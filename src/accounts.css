@@ -1,0 +1,145 @@
+.account-link-page {
+  min-height: 100vh;
+  background: #f7f9f4;
+  padding: 40px 24px;
+}
+.account-link-page > .brand {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  margin-bottom: 34px;
+}
+.account-link-card {
+  width: min(100%, 460px);
+  margin: 0 auto;
+  padding: 32px;
+}
+.account-emblem {
+  height: 52px;
+  width: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #edf3e7;
+  border-radius: 14px;
+  color: var(--green);
+  margin-bottom: 20px;
+}
+.account-link-card h1 {
+  font-size: 27px;
+  line-height: 1.3;
+  letter-spacing: -0.7px;
+  margin: 0 0 18px;
+}
+.account-link-card p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.account-link-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+.account-link-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+}
+.account-link-card form > a {
+  font-size: 14px;
+  text-align: center;
+  color: var(--green);
+}
+.account-panel {
+  margin-bottom: 24px;
+}
+.account-panel .panel-heading {
+  padding: 22px;
+}
+.account-panel h2 {
+  font-size: 18px;
+}
+.account-panel p {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.account-panel-body {
+  padding: 0 22px 22px;
+}
+.account-help {
+  font-size: 13px !important;
+}
+.preference-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+.preference-row:last-child {
+  border-bottom: 0;
+}
+.preference-row > strong,
+.preference-row > span {
+  flex: 1;
+}
+.preference-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.preference-row input[type='checkbox'] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--green);
+}
+.member-lifecycle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line);
+}
+.member-lifecycle-row > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.member-lifecycle-row strong {
+  font-size: 14px;
+}
+.member-lifecycle-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .account-link-card {
+    padding: 24px;
+  }
+  .preference-row {
+    gap: 13px;
+  }
+  .preference-row > strong {
+    flex-basis: 100%;
+  }
+  .member-lifecycle-row {
+    flex-wrap: wrap;
+  }
+  .member-lifecycle-row > .btn {
+    margin-left: 40px;
+  }
+  .account-panel .panel-heading,
+  .account-panel-body {
+    padding: 18px;
+  }
+}

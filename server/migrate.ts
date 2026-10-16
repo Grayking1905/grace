@@ -1,0 +1,13 @@
+import { Database } from './db.js';
+import { applyPlanningMigrations } from './migrations.js';
+import { applyExpansionMigrations } from './expansion-migrations.js';
+import { applySearchMigration } from './features/search.js';
+import { applyPortfolioMigration } from './features/portfolio.js';
+const db = new Database();
+await db.migrate();
+await applyPlanningMigrations(db);
+await applyExpansionMigrations(db);
+await applySearchMigration(db);
+await applyPortfolioMigration(db);
+console.log(`Grace: ${db.driver} schema and planning migrations applied.`);
+await db.close();
