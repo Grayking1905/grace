@@ -1,0 +1,144 @@
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
+import request from 'supertest';
+import mysql from 'mysql2/promise';
+import { randomBytes } from 'node:crypto';
+import { Database } from '../server/db.js';
+import { createApp } from '../server/app.js';
+import { applyPlanningMigrations } from '../server/migrations.js';
+import { applyExpansionMigrations } from '../server/expansion-migrations.js';
+import { applySearchMigration } from '../server/features/search.js';
+import { createBackup, restoreBackup } from '../server/backup.js';
+let instance: Awaited<ReturnType<typeof createApp>>;
+let owner: ReturnType<typeof request.agent>;
+const csrf = { 'X-Grace-CSRF': '1' };
+const enabled = process.env.GRACE_MYSQL_TEST === 'true';
+describe.skipIf(!enabled)('Real MySQL 8 integration', () => {
+  beforeAll(async () => {
+    process.env.DATABASE_URL = process.env.GRACE_MYSQL_URL;
+    instance = await createApp({ db: new Database('mysql'), seed: true, mailer: async () => {} });
+    owner = request.agent(instance.app);
+    expect((await owner.post('/api/v1/auth/demo').set(csrf)).status).toBe(200);
+  }, 60000);
+  afterAll(async () => {
+    if (instance) {
+      await instance.accounts.flush();
+      instance.io.close();
+      await instance.db.close();
+    }
+  });
+  it('uses MySQL 8 and applies migrations idempotently without removing custom states', async () => {
+    const result = await instance.db.one<{ version: string }>('SELECT VERSION() AS version');
+    expect(result?.version).toMatch(/^8\./);
+    await instance.db.migrate();
+    await applyPlanningMigrations(instance.db);
+    await applyExpansionMigrations(instance.db);
+    await applySearchMigration(instance.db);
+    const versions = await instance.db.all<{ version: number }>(
+      'SELECT version FROM schema_migrations ORDER BY version',
+    );
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+  it('uses the actual MySQL full-text index and bounded keyset pagination', async () => {
+    const marker = `searchable-${randomBytes(3).toString('hex')}`;
+    const created = await owner
+      .post('/api/v1/issues')
+      .set(csrf)
+      .send({ project_id: 'project-platform', summary: `Coral integration ${marker}` });
+    expect(created.status).toBe(201);
+    const found = await owner.get('/api/v1/search/issues').query({ q: 'Coral' });
+    expect(found.status).toBe(200);
+    expect(found.body.engine).toBe('mysql-fulltext');
+    expect(found.body.items.some((i: { id: string }) => i.id === created.body.id)).toBe(true);
+    const first = await owner.get('/api/v1/search/issues').query({ limit: 2 });
+    expect(first.body.items).toHaveLength(2);
+    const next = await owner
+      .get('/api/v1/search/issues')
+      .query({ limit: 2, cursor: first.body.nextCursor });
+    expect(
+      next.body.items.every(
+        (i: { id: string }) => !first.body.items.some((j: { id: string }) => i.id === j.id),
+      ),
+    ).toBe(true);
+  });
+  it('allocates unique issue keys under competing writes and rolls back stale bulk edits', async () => {
+    const result = await Promise.all(
+      Array.from({ length: 8 }, (_, n) =>
+        owner
+          .post('/api/v1/issues')
+          .set(csrf)
+          .send({ project_id: 'project-platform', summary: `MySQL concurrency ${n}` }),
+      ),
+    );
+    expect(result.every((r) => r.status === 201)).toBe(true);
+    expect(new Set(result.map((r) => r.body.key)).size).toBe(8);
+    const [a, b] = result.map((r) => r.body);
+    expect(
+      (
+        await owner
+          .patch(`/api/v1/issues/${b.id}`)
+          .set(csrf)
+          .send({ version: b.version, summary: 'Edited elsewhere' })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await owner
+          .post('/api/v1/issues/bulk')
+          .set(csrf)
+          .send({
+            items: [
+              { id: a.id, version: a.version },
+              { id: b.id, version: b.version },
+            ],
+            changes: { priority: 'critical' },
+          })
+      ).status,
+    ).toBe(409);
+    expect((await owner.get(`/api/v1/issues/${a.id}`)).body.issue.priority).toBe('medium');
+  });
+  it('moves issue identity and resolves aliases on the real SQL adapter', async () => {
+    const created = await owner
+      .post('/api/v1/issues')
+      .set(csrf)
+      .send({ project_id: 'project-platform', summary: 'MySQL move', type: 'task' });
+    const moved = await owner
+      .post(`/api/v1/issues/${created.body.id}/move`)
+      .set(csrf)
+      .send({ project_id: 'project-mobile', version: created.body.version });
+    expect(moved.status).toBe(200);
+    expect((await owner.get(`/api/v1/issues/${created.body.key}`)).body.issue.key).toBe(
+      moved.body.key,
+    );
+  });
+  it('encrypts backups, rejects modified data, and refuses nonempty restore targets', async () => {
+    const key = randomBytes(32).toString('hex');
+    const backup = await createBackup(instance.db, key);
+    expect(backup.toString()).not.toContain('alex@grace.local');
+    await expect(
+      restoreBackup(instance.db, backup, 'wrong-key-that-is-at-least-32-characters'),
+    ).rejects.toThrow('authenticated');
+    await expect(restoreBackup(instance.db, backup, key)).rejects.toThrow('empty target');
+  });
+  it('restores encrypted data into a fresh MySQL schema with hierarchy and foreign keys intact', async () => {
+    const connection = await mysql.createConnection(process.env.GRACE_MYSQL_URL!);
+    const name = `grace_test_restore_${randomBytes(4).toString('hex')}`;
+    await connection.query(`CREATE DATABASE ${name} CHARACTER SET utf8mb4`);
+    const previous = process.env.DATABASE_URL;
+    const url = new URL(previous!);
+    url.pathname = `/${name}`;
+    process.env.DATABASE_URL = url.toString();
+    const restored = new Database('mysql');
+    process.env.DATABASE_URL = previous;
+    try {
+      const key = randomBytes(32).toString('hex');
+      await restoreBackup(restored, await createBackup(instance.db, key), key);
+      const count = await restored.one<{ n: number }>('SELECT COUNT(*) n FROM issues');
+      expect(count?.n).toBeGreaterThan(28);
+      expect(await restored.one('SELECT alias_key FROM issue_aliases LIMIT 1')).toBeDefined();
+    } finally {
+      await restored.close();
+      await connection.query(`DROP DATABASE ${name}`);
+      await connection.end();
+    }
+  }, 60000);
+});

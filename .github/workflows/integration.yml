@@ -1,0 +1,29 @@
+name: Grace integration
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: grace-ci-only
+          MYSQL_DATABASE: grace_ci
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping -h 127.0.0.1 -pgrace-ci-only" --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      NODE_ENV: test
+      GRACE_MYSQL_URL: mysql://root:grace-ci-only@127.0.0.1:3306/grace_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run test:mysql
+      - run: npm run build

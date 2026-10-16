@@ -1,0 +1,383 @@
+.administration-page {
+  font-size: 14px;
+}
+.administration-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.administration-layout > nav {
+  display: grid;
+  gap: 6px;
+}
+.administration-layout > nav button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 9px;
+  color: #66716c;
+  font: inherit;
+  cursor: pointer;
+}
+.administration-layout > nav button:hover {
+  background: #f1f4f1;
+  color: #2f5142;
+}
+.administration-layout > nav button.active {
+  color: #315a47;
+  background: #e9f1eb;
+  font-weight: 650;
+}
+.administration-panel {
+  padding: 28px;
+  min-width: 0;
+}
+.administration-panel h2 {
+  font-size: 20px;
+  margin: 0 0 7px;
+  letter-spacing: -0.45px;
+}
+.administration-panel p {
+  color: #727c76;
+  line-height: 1.65;
+  font-size: 14px;
+  margin: 0;
+}
+.administration-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 24px;
+}
+.administration-section-heading .btn {
+  flex: 0 0 auto;
+}
+.administration-records {
+  border-top: 1px solid #e9ece8;
+}
+.administration-record {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 19px 0;
+  border-bottom: 1px solid #e9ece8;
+}
+.administration-record:last-child {
+  border-bottom: 0;
+}
+.administration-record-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #f0f3ed;
+  color: #687a68;
+  flex: 0 0 auto;
+}
+.administration-record-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+.administration-record-copy strong {
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.administration-record-copy span,
+.administration-record-copy small {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #778178;
+  overflow-wrap: anywhere;
+}
+.administration-record-copy .badge {
+  margin-left: 8px;
+}
+.administration-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: #f3f6ef;
+  color: #627657;
+  margin: 0 0 24px;
+}
+.administration-note > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.administration-note p {
+  color: #65725e;
+  font-size: 14px;
+}
+.administration-form {
+  display: grid;
+  gap: 20px;
+  font-size: 14px;
+}
+.administration-form > p {
+  color: #727c76;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 0;
+}
+.administration-form label,
+.administration-search-label {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  color: #4f5a52;
+  font-weight: 550;
+}
+.administration-form input,
+.administration-form select,
+.administration-form textarea,
+.administration-search-label input,
+.administration-role-label select {
+  font-size: 14px;
+  width: 100%;
+  border: 1px solid #dce2d9;
+  background: #fff;
+  border-radius: 7px;
+  padding: 11px 12px;
+  color: #35453a;
+  min-height: 43px;
+}
+.administration-form textarea {
+  resize: vertical;
+}
+.administration-form-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.administration-form .administration-form-help {
+  color: #858d86;
+  font-size: 13px;
+}
+.administration-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding-top: 5px;
+}
+.administration-session-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.administration-search-label {
+  margin-bottom: 20px;
+}
+.administration-loading {
+  color: #737c73;
+  padding: 32px 0;
+  font-size: 14px;
+}
+.administration-error {
+  border: 1px solid #edd8d1;
+  background: #fff7f4;
+  border-radius: 9px;
+  padding: 18px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #96634f;
+}
+.administration-error .btn {
+  margin-top: 12px;
+}
+.administration-project-settings {
+  display: grid;
+  gap: 24px;
+  padding-top: 24px;
+}
+.administration-archive-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+.administration-archive-panel p {
+  max-width: 660px;
+}
+.administration-archive-panel .btn {
+  flex: 0 0 auto;
+}
+.administration-role-label {
+  flex: 0 0 155px;
+}
+.administration-role-label .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.administration-role-label select {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+.administration-workspace-menu {
+  min-width: 300px;
+  max-width: min(360px, calc(100vw - 28px));
+  padding: 16px !important;
+  z-index: 60;
+}
+.administration-workspace-switch > span:nth-child(2) {
+  min-width: 0;
+}
+.administration-workspace-switch strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.administration-workspace-switch small {
+  font-size: 12px;
+}
+.administration-workspace-menu > strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.administration-workspace-menu .administration-search-label {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.administration-workspace-options {
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0 -6px 8px;
+  padding: 0 6px;
+}
+.administration-workspace-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  gap: 12px;
+  border: 0;
+  padding: 12px 8px;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #3e4f42;
+}
+.administration-workspace-option:hover {
+  background: #f3f6ef;
+}
+.administration-workspace-option.active {
+  background: #edf3e9;
+  opacity: 1;
+}
+.administration-workspace-option > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.administration-workspace-option strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.administration-workspace-option small {
+  font-size: 12px;
+  color: #778276;
+  text-transform: capitalize;
+}
+.administration-workspace-initial {
+  display: grid;
+  place-items: center;
+  width: 33px;
+  height: 33px;
+  border-radius: 9px;
+  background: #e6ecd9;
+  color: #5d704b;
+  font-size: 15px;
+  font-weight: 700;
+}
+.administration-menu-action {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-start !important;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 8px !important;
+  color: #5b6d5d !important;
+  font: inherit;
+  font-size: 14px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: 8px;
+}
+.administration-menu-action:hover {
+  background: #f1f5ed;
+}
+@media (max-width: 1050px) {
+  .administration-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .administration-layout > nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .administration-panel {
+    padding: 22px;
+  }
+}
+@media (max-width: 700px) {
+  .administration-section-heading,
+  .administration-archive-panel {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .administration-record {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .administration-record-copy {
+    min-width: calc(100% - 60px);
+  }
+  .administration-record > .btn,
+  .administration-record > .badge {
+    margin-left: 54px;
+  }
+  .administration-form-columns {
+    grid-template-columns: 1fr;
+  }
+  .administration-role-label {
+    margin-left: 52px;
+  }
+  .administration-record .administration-role-label + .btn {
+    margin-left: 0;
+  }
+  .administration-layout > nav button {
+    padding: 10px 11px;
+    font-size: 13px;
+  }
+}
