@@ -47,15 +47,12 @@ afterAll(async () => {
 });
 it('delivers a real SMTP verification message and records metadata without storing its token', async () => {
   const user = request.agent(app.app);
-  const response = await user
-    .post('/api/v1/auth/register')
-    .set('X-Grace-CSRF', '1')
-    .send({
-      email: 'smtp-recipient@example.test',
-      name: 'SMTP User',
-      workspace: 'SMTP workspace',
-      password: 'LocalTestPassword2026!',
-    });
+  const response = await user.post('/api/v1/auth/register').set('X-Grace-CSRF', '1').send({
+    email: 'smtp-recipient@example.test',
+    name: 'SMTP User',
+    workspace: 'SMTP workspace',
+    password: 'LocalTestPassword2026!',
+  });
   expect(response.status).toBe(201);
   await app.accounts.flush();
   expect(received).toHaveLength(1);

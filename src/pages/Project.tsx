@@ -5,7 +5,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   KeyboardSensor,
   useSensor,
   useSensors,
@@ -76,7 +77,7 @@ import { BacklogRankControls } from '../components/IssueTools';
 
 export function ProjectPage() {
   const { projectId, view = 'board' } = useParams();
-  const { data, openCreate } = useGrace();
+  const { data, openCreate, openCreateMenu } = useGrace();
   const project = data.projects.find((p) => p.id === projectId);
   if (!project)
     return (
@@ -128,11 +129,13 @@ export function ProjectPage() {
             <span>Copy link</span>
           </Button>
           <Button
-            onClick={() => openCreate({ project_id: project.id })}
+            onClick={() =>
+              openCreateMenu ? openCreateMenu() : openCreate({ project_id: project.id })
+            }
             disabled={data.user.role === 'viewer'}
           >
             <Plus size={16} />
-            Create issue
+            Create
           </Button>
         </div>
       </div>
@@ -176,7 +179,18 @@ export function ProjectPage() {
 }
 
 function Board({ project }: { project: Project }) {
-  useEffect(()=>{const frame=requestAnimationFrame(()=>{if(typeof performance.mark==='function'){performance.mark('grace.board.rendered');performance.measure('grace.board.initial-render',{start:0,end:'grace.board.rendered'});}});return()=>cancelAnimationFrame(frame);},[project.id]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (typeof performance.mark === 'function') {
+        performance.mark('grace.board.rendered');
+        performance.measure('grace.board.initial-render', {
+          start: 0,
+          end: 'grace.board.rendered',
+        });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [project.id]);
   const { data, openCreate, toast, refresh, run } = useGrace();
   const client = useQueryClient();
   const [search, setSearch] = useState('');
@@ -211,8 +225,10 @@ function Board({ project }: { project: Project }) {
       `${i.key} ${i.summary}`.toLowerCase().includes(search.toLowerCase()),
   );
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
     useSensor(KeyboardSensor, {
+      keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space'] },
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
@@ -687,7 +703,14 @@ function VirtualBoardCards({
       style={enabled ? { height: 'min(640px,60vh)', overflowY: 'auto' } : undefined}
     >
       {enabled ? (
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%',flexShrink:0 }}>
+        <div
+          style={{
+            height: virtualizer.getTotalSize(),
+            position: 'relative',
+            width: '100%',
+            flexShrink: 0,
+          }}
+        >
           {virtualizer.getVirtualItems().map((row) => (
             <div
               key={row.key}
@@ -728,15 +751,43 @@ function IssueCard({
   const { data, openIssue } = useGrace();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: overlay ? `overlay-${issue.id}` : issue.id,
-    disabled: overlay || data.user.role === 'viewer',
+    disabled:
+      overlay ||
+      data.user.role === 'viewer' ||
+      data.projects.find((p) => p.id === issue.project_id)?.can_write === false,
     data: { status_id: issue.status_id },
   });
+  const suppressClick = useRef(false);
+  useEffect(() => {
+    if (isDragging) {
+      suppressClick.current = true;
+      return;
+    }
+    const timer = setTimeout(() => {
+      suppressClick.current = false;
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [isDragging]);
   const style = { transform: CSS.Transform.toString(transform), transition };
   const due = issue.due_date;
   const isDone = data.statuses.find((s) => s.id === issue.status_id)?.category === 'done';
   const overdue = due && due < new Date().toISOString().slice(0, 10) && !isDone;
   return (
     <article
+      {...attributes}
+      {...listeners}
+      role="button"
+      tabIndex={overlay ? -1 : 0}
+      aria-label={`${issue.key}: ${issue.summary}. Enter to open, Space to move.`}
+      onClick={() => {
+        if (!overlay && !suppressClick.current) openIssue(issue.id);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          openIssue(issue.id);
+        } else listeners?.onKeyDown?.(event);
+      }}
       aria-hidden={overlay || undefined}
       ref={setNodeRef}
       style={style}
@@ -749,19 +800,12 @@ function IssueCard({
         </span>
         <div>
           {issue.flagged > 0 && <Flag size={13} color="#b67766" />}
-          <button
-            {...attributes}
-            {...listeners}
-            className="drag-handle"
-            aria-label={`Drag ${issue.key}`}
-          >
+          <span className="drag-handle" aria-hidden="true">
             <GripVertical size={15} />
-          </button>
+          </span>
         </div>
       </div>
-      <button className="card-summary" onClick={() => openIssue(issue.id)}>
-        {issue.summary}
-      </button>
+      <span className="card-summary">{issue.summary}</span>
       <div className="card-labels">
         {issue.labels.slice(0, 2).map((l, n) => (
           <span

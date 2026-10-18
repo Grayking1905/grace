@@ -36,7 +36,7 @@ describe.skipIf(!enabled)('Real MySQL 8 integration', () => {
     const versions = await instance.db.all<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version',
     );
-    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
   it('uses the actual MySQL full-text index and bounded keyset pagination', async () => {
     const marker = `searchable-${randomBytes(3).toString('hex')}`;
@@ -109,6 +109,48 @@ describe.skipIf(!enabled)('Real MySQL 8 integration', () => {
     expect((await owner.get(`/api/v1/issues/${created.body.key}`)).body.issue.key).toBe(
       moved.body.key,
     );
+  });
+  it('persists organization assignments, team work and concurrency checks on MySQL', async () => {
+    const bootstrap = (await owner.get('/api/v1/bootstrap')).body;
+    expect(bootstrap.organization.teams).toHaveLength(6);
+    const team = bootstrap.organization.teams.find((t: { slug: string }) => t.slug === 'frontend');
+    const created = await owner.post('/api/v1/organization/work').set(csrf).send({
+      team_id: team.id,
+      kind: 'brd',
+      title: 'MySQL business requirements',
+      owner_id: 'user-sarah',
+      content: '<h2>Requirements</h2><p>Persist in MySQL</p>',
+    });
+    expect(created.status).toBe(201);
+    const updated = await owner
+      .patch(`/api/v1/organization/work/${created.body.id}`)
+      .set(csrf)
+      .send({ ...created.body, state: 'review' });
+    expect(updated.status).toBe(200);
+    expect(updated.body.version).toBe(2);
+    expect(
+      (
+        await owner
+          .patch(`/api/v1/organization/work/${created.body.id}`)
+          .set(csrf)
+          .send(created.body)
+      ).status,
+    ).toBe(409);
+    const employee = request.agent(instance.app);
+    expect(
+      (
+        await employee.post('/api/v1/auth/login').set(csrf).send({
+          employee_id: bootstrap.user.employee_id,
+          organization: bootstrap.workspace.slug,
+          password: 'GraceDemo2026!',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await employee.get('/api/v1/organization/work')).body.some(
+        (w: { id: string }) => w.id === created.body.id,
+      ),
+    ).toBe(true);
   });
   it('encrypts backups, rejects modified data, and refuses nonempty restore targets', async () => {
     const key = randomBytes(32).toString('hex');

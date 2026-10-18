@@ -7,13 +7,13 @@ This is a browser-session API for the development release. Scoped API tokens, co
 ## Authentication
 
 - `POST /auth/register`: email, password (10–128 characters), name, workspace; or invite_token instead of workspace.
-- `POST /auth/login`: email and password.
+- `POST /auth/login`: email and password, or employee_id, organization (workspace slug) and password.
 - `POST /auth/demo`: local development only.
 - `POST /auth/refresh`: rotates the refresh cookie.
 - `POST /auth/logout`: invalidates the current server session.
 - `GET /auth/me`: the signed-in profile and workspace role.
 - `GET /auth/invite?token=...`: valid invitation summary, without accepting it.
-- `POST /invites`: admin only; email and role; returns a single-use URL.
+- `POST /invites`: admin only; email and organization role; optional employee_id, team_id and team_role reserve an email-bound team assignment. Returns a single-use URL. Supplying an employee ID requires a team.
 - `POST /invites/accept`: signed-in invited email accepts a token and enters the workspace.
 
 ## Workspace and projects
@@ -60,3 +60,31 @@ This is a browser-session API for the development release. Scoped API tokens, co
 ## Real time
 
 Socket.IO uses the same authenticated access cookie. Each socket enters its current workspace room. A generic `workspace.updated` event causes clients to refetch through the API; sensitive record payloads are not broadcast. Sessions are rechecked every 30 seconds. Redis fan-out and event replay are not yet implemented.
+
+## Organization teams and work
+
+- `GET /organization`: the current employee assignment and accessible team dashboards. Owners/admins see every team; employees see their assigned team.
+- `POST /organization/teams`: admin creates name, description, color, sections, permissions. Sections: issues/bugs/features/brds/daily/versions. Permissions map lead/member/viewer roles to work/brds/daily/versions editing capabilities; viewers remain read-only.
+- `PATCH /organization/teams/:id`: admin supplies the full configuration and required version. Stale edits return 409.
+- `GET /organization/employees`: admin employee directory with employee IDs, team assignments, organization roles, active state and assignment versions.
+- `PUT /organization/employees/:id`: admin supplies employee_id, team_id, team_role and version. IDs are unique within the organization, including reservations from pending invitations. Changing teams requires reassignment/completion of open organization work.
+- `GET /organization/work`: optional team_id, kind=brd/daily/version and mine=true. Returns the most recent 500 accessible items. Private-project access and team assignment are enforced before limiting results.
+- `GET /organization/work/:id`: the accessible item, visible issue_ids and has_hidden_links. Hidden links are retained on edits.
+- `POST /organization/work`: team_id, kind, title, owner_id; optional project_id, content (sanitized rich HTML), state, due_date, version_tag, issue_ids. States: draft/planned/active/review/done. Versions require version_tag. Project and linked-issue access are checked.
+- `PATCH /organization/work/:id`: full work fields and required version; the team and kind cannot change. Author/owner/lead/admin and team capability checks apply.
+- `DELETE /organization/work/:id?version=N`: same edit permissions and a matching version; removes the item and its traceability links, records an audit event, and broadcasts invalidation.
+
+## Expansion endpoints
+
+- `POST /auth/forgot-password`, `/auth/reset-password`, `/auth/verify-email`; `GET /account/security`; `POST /account/verification`.
+- `POST /members/:id/deactivate` or `/reactivate`: admin only; owner/self safeguards and session revocation.
+- `GET/PATCH /account/notifications`: per-event in-app/email preferences.
+- `GET /issues/:id/people`, `PUT /issues/:id/watchers`, `DELETE /issues/:id/comments/:commentId`.
+- `GET /project-templates`; `GET/POST/PATCH/DELETE /issue-templates`; template mutations require access and update/delete versions.
+- `POST /issues/:id/move`: project_id, version, optional status_id; stable aliases preserve earlier keys. Hierarchy moves are rejected.
+- `POST /issues/:id/rank`: version, before_id, after_id; validates adjacent anchors in the same project/cycle group.
+- `GET/PUT /modules/:id/planning`: member assignment, dependency DAG and summary metrics; PUT requires version.
+- `GET/POST /initiatives`, `PATCH /initiatives/:id`; `GET/PUT /sprints/:id/retrospectives`.
+- `GET /search/issues?q=&project_id=&cursor=&limit=`: keyset pagination, max 200 results, MySQL full-text search.
+- `GET /bootstrap?issue_limit=100&issue_cursor=...&project_id=...`: optional bounded issue page with issue_page.nextCursor. Omitting issue_limit retains the original complete bootstrap.
+- `GET /reports/summary?project_id=&days=30`: scoped SQL aggregates; date window max 366 days.

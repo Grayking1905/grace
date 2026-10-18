@@ -69,13 +69,13 @@ export function WorkspaceSwitcher() {
         </span>
         <span>
           <strong>{data.workspace.name}</strong>
-          <small>Workspace · {data.user.role}</small>
+          <small>Organization · {data.user.role}</small>
         </span>
         <ChevronsUpDown size={16} />
       </button>
       {open && (
         <div className="workspace-popover administration-workspace-menu" id="workspace-options">
-          <strong>Your workspaces</strong>
+          <strong>Your organizations</strong>
           <label className="administration-search-label">
             Find a workspace
             <input

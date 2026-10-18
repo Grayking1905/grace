@@ -112,7 +112,8 @@ export function registerPortfolioRoutes({
       if (existing.length > 5000)
         throw new HttpError(400, 'Dependency planning exceeds the current graph budget.');
       // Replacing a plan must not silently remove dependencies the editor cannot see.
-      for(const edge of existing.filter(e=>e.module_id===current.id))await module(req,edge.depends_on_id);
+      for (const edge of existing.filter((e) => e.module_id === current.id))
+        await module(req, edge.depends_on_id);
       const graph = new Map<string, string[]>();
       for (const edge of existing.filter((e) => e.module_id !== current.id))
         graph.set(edge.module_id, [...(graph.get(edge.module_id) || []), edge.depends_on_id]);

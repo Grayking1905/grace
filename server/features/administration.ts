@@ -130,6 +130,10 @@ export function registerAdministrationRoutes(ctx: AdministrationContext) {
   app.delete('/api/v1/invites/:id', async (req, res) => {
     canAdmin(req);
     await db.transaction(async () => {
+      await db.run(
+        'DELETE FROM employee_invites WHERE invite_id IN (SELECT id FROM invites WHERE id=? AND workspace_id=? AND accepted_at IS NULL)',
+        [String(req.params.id), req.workspaceId],
+      );
       const removed = await db.run(
         'DELETE FROM invites WHERE id = ? AND workspace_id = ? AND accepted_at IS NULL',
         [String(req.params.id), req.workspaceId],

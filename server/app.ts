@@ -25,6 +25,15 @@ import type { NotificationEvent } from '../shared/notifications.js';
 import { registerWorkManagementRoutes } from './features/work-management.js';
 import { applySearchMigration, registerSearchRoutes, queryIssuePage } from './features/search.js';
 import { applyPortfolioMigration, registerPortfolioRoutes } from './features/portfolio.js';
+import { applyOrganizationMigration, organizationContext } from './organization.js';
+import {
+  registerOrganizationRoutes,
+  employeeIdSchema,
+  teamRoleSchema,
+  reserveEmployeeInvite,
+  claimEmployeeInvite,
+  requireWorkPrivilege,
+} from './features/organization.js';
 import { createServer } from 'node:http';
 import { mkdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -91,6 +100,7 @@ export async function createApp(
   await applyExpansionMigrations(db);
   await applySearchMigration(db);
   await applyPortfolioMigration(db);
+  await applyOrganizationMigration(db);
   const accounts = createAccounts(db, options.mailer);
   const dispatchNotification = createNotifications(db, accounts);
   const app = express();
@@ -157,23 +167,45 @@ export async function createApp(
   }
   registerPublicAccountRoutes(app, db, accounts, revokeUser);
   app.post('/api/v1/auth/login', authLimit, async (req, res) => {
-    const body = credentials.parse(req.body);
+    const body = z
+      .object({
+        email: z
+          .email()
+          .transform((v) => v.toLowerCase())
+          .optional(),
+        employee_id: employeeIdSchema.optional(),
+        organization: z.string().trim().max(120).optional(),
+        password: z.string().min(10).max(128),
+      })
+      .refine(
+        (v) => !!v.email || !!(v.employee_id && v.organization),
+        'Enter your email, or employee ID and organization code.',
+      )
+      .parse(req.body);
     const user = await db.one<{ id: string; password_hash: string }>(
-      'SELECT id,password_hash FROM users WHERE email = ?',
-      [body.email],
+      body.email
+        ? 'SELECT id,password_hash FROM users WHERE email = ?'
+        : 'SELECT u.id,u.password_hash FROM users u JOIN employee_profiles e ON e.user_id=u.id JOIN workspaces w ON w.id=e.workspace_id WHERE e.employee_id=? AND w.slug=?',
+      body.email ? [body.email] : [body.employee_id, body.organization],
     );
     if (!user || !(await bcrypt.compare(body.password, user.password_hash)))
-      throw new HttpError(401, 'Email or password is incorrect.');
+      throw new HttpError(401, 'Your sign-in details are incorrect.');
     const membership = await db.one<{ workspace_id: string }>(
       'SELECT workspace_id FROM memberships m WHERE user_id = ? AND ' +
         activeMembership() +
+        (body.email ? '' : ' AND workspace_id=(SELECT id FROM workspaces WHERE slug=?)') +
         ' ORDER BY workspace_id LIMIT 1',
-      [user.id],
+      body.email ? [user.id] : [user.id, body.organization],
     );
     if (!membership) throw new HttpError(403, 'This account has no active workspace.');
-    await db.transaction(async()=>{
-      const current=await db.one<{password_hash:string}>('SELECT password_hash FROM users WHERE id=?'+(db.driver==='mysql'?' FOR UPDATE':''),[user.id]);
-      if(current?.password_hash!==user.password_hash)throw new HttpError(401,'Your credentials changed. Sign in again.');
+    await db.transaction(async () => {
+      await db.run('UPDATE workspaces SET name=name WHERE id=?', [membership.workspace_id]);
+      const current = await db.one<{ password_hash: string }>(
+        'SELECT password_hash FROM users WHERE id=?' + (db.driver === 'mysql' ? ' FOR UPDATE' : ''),
+        [user.id],
+      );
+      if (current?.password_hash !== user.password_hash)
+        throw new HttpError(401, 'Your credentials changed. Sign in again.');
       await createSession(db, res, user.id, membership.workspace_id);
     });
     res.json({ ok: true });
@@ -184,6 +216,7 @@ export async function createApp(
         name: z.string().trim().min(2).max(120),
         workspace: z.string().trim().min(2).max(120).optional(),
         invite_token: z.string().max(128).optional(),
+        employee_id: employeeIdSchema.optional(),
       })
       .parse(req.body);
     if (await db.one('SELECT id FROM users WHERE email = ?', [body.email]))
@@ -231,7 +264,13 @@ export async function createApp(
         user_id: userId,
         role: invite?.role || 'owner',
       });
+      if (invite) await claimEmployeeInvite(db, workspaceId, userId, invite.id, body.employee_id);
       await createSession(db, res, userId, workspaceId);
+      if (!invite && body.employee_id)
+        await db.run(
+          'UPDATE employee_profiles SET employee_id=? WHERE workspace_id=? AND user_id=?',
+          [body.employee_id, workspaceId, userId],
+        );
     });
     await accounts.issueToken(userId, 'verify');
     res.status(201).json({ ok: true, verification_sent: true });
@@ -249,13 +288,21 @@ export async function createApp(
   app.get('/api/v1/auth/invite', authLimit, async (req, res) => {
     const token = z.string().min(32).max(128).parse(req.query.token);
     const invite = await db.one(
-      'SELECT i.email,i.role,w.name AS workspace FROM invites i JOIN workspaces w ON w.id=i.workspace_id WHERE i.token_hash = ? AND i.accepted_at IS NULL AND i.expires_at > ?',
+      'SELECT i.email,i.role,w.name AS workspace,w.slug AS organization,e.employee_id,t.name AS team FROM invites i JOIN workspaces w ON w.id=i.workspace_id LEFT JOIN employee_invites e ON e.invite_id=i.id LEFT JOIN organization_teams t ON t.id=e.team_id WHERE i.token_hash = ? AND i.accepted_at IS NULL AND i.expires_at > ?',
       [hash(token), now()],
     );
     if (!invite) throw new HttpError(404, 'This invitation is expired or has already been used.');
     res.json(invite);
   });
   app.use('/api/v1', authenticate(db));
+  app.use('/api/v1/issues', (req, _res, next) => {
+    try {
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) requireWorkPrivilege(req);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post('/api/v1/auth/logout', async (req, res) => {
     await db.run('DELETE FROM sessions WHERE id = ?', [req.sessionId]);
     clearCookies(res);
@@ -268,6 +315,9 @@ export async function createApp(
       .object({
         email: z.email().transform((v) => v.toLowerCase()),
         role: z.enum(['admin', 'member', 'viewer']).default('member'),
+        employee_id: employeeIdSchema.optional(),
+        team_id: z.string().optional(),
+        team_role: teamRoleSchema.optional(),
       })
       .parse(req.body);
     if (
@@ -278,15 +328,20 @@ export async function createApp(
     )
       throw new HttpError(409, 'This person already belongs to the workspace.');
     const token = randomBytes(32).toString('hex');
-    await db.insert('invites', {
-      ...body,
-      id: id(),
-      workspace_id: req.workspaceId,
-      token_hash: hash(token),
-      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-      created_at: now(),
+    const inviteId = id();
+    await db.transaction(async () => {
+      await db.insert('invites', {
+        email: body.email,
+        role: body.role,
+        id: inviteId,
+        workspace_id: req.workspaceId,
+        token_hash: hash(token),
+        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        created_at: now(),
+      });
+      await reserveEmployeeInvite(db, req.workspaceId, inviteId, body);
+      await audit(req, 'member.invited', req.workspaceId, body.email);
     });
-    await audit(req, 'member.invited', req.workspaceId, body.email);
     res.status(201).json({ url: `${origin}/invite?token=${token}`, expires_in_days: 7 });
   });
   app.post('/api/v1/invites/accept', async (req, res) => {
@@ -321,6 +376,7 @@ export async function createApp(
           role: invite.role,
         });
       await db.run('DELETE FROM sessions WHERE id = ?', [req.sessionId]);
+      await claimEmployeeInvite(db, invite.workspace_id, req.user.id, invite.id);
       await createSession(db, res, req.user.id, invite.workspace_id);
     });
     res.json({ ok: true });
@@ -367,6 +423,9 @@ export async function createApp(
         can_write:
           !p.archived_at &&
           req.user.role !== 'viewer' &&
+          (admin ||
+            (req.user.team_role !== 'viewer' &&
+              req.user.team_permissions?.includes('work') !== false)) &&
           (admin || members.find((m) => m.project_id === p.id)?.role !== 'viewer'),
         can_admin:
           req.user.role !== 'viewer' &&
@@ -521,6 +580,7 @@ export async function createApp(
     }
   }
   async function createIssue(req: Request, raw: unknown) {
+    requireWorkPrivilege(req);
     const body = issueSchema.parse(raw);
     const configuration = await db.one<{ issue_types: string; default_type: Issue['type'] }>(
       'SELECT issue_types,default_type FROM project_configuration WHERE project_id=?',
@@ -608,6 +668,7 @@ export async function createApp(
 
   registerSearchRoutes(app, db);
   registerPortfolioRoutes({ app, db, project, visibleProjects, audit, broadcast });
+  registerOrganizationRoutes({ app, db, project, issue, visibleProjects, audit, broadcast });
   app.get('/api/v1/bootstrap', async (req, res) => {
     const issuePage =
       req.query.issue_limit !== undefined
@@ -634,7 +695,7 @@ export async function createApp(
     ] = await Promise.all([
       db.one<Workspace>('SELECT * FROM workspaces WHERE id = ?', [req.workspaceId]),
       db.all<User>(
-        'SELECT u.id,u.name,u.email,u.color,u.capacity,m.role,CASE WHEN md.user_id IS NULL THEN 1 ELSE 0 END AS active FROM users u JOIN memberships m ON m.user_id=u.id LEFT JOIN member_deactivations md ON md.workspace_id=m.workspace_id AND md.user_id=m.user_id WHERE m.workspace_id = ? ORDER BY u.name',
+        'SELECT u.id,u.name,u.email,u.color,u.capacity,m.role,e.employee_id,e.team_id,e.team_role,CASE WHEN md.user_id IS NULL THEN 1 ELSE 0 END AS active FROM users u JOIN memberships m ON m.user_id=u.id LEFT JOIN employee_profiles e ON e.workspace_id=m.workspace_id AND e.user_id=m.user_id LEFT JOIN member_deactivations md ON md.workspace_id=m.workspace_id AND md.user_id=m.user_id WHERE m.workspace_id = ? ORDER BY u.name',
         [req.workspaceId],
       ),
       db.all<Status>('SELECT * FROM statuses WHERE workspace_id = ? ORDER BY position', [
@@ -684,6 +745,7 @@ export async function createApp(
       standups,
       risks: risks.filter(visible),
       database: db.driver,
+      organization: await organizationContext(db, req.workspaceId, req.user.id, req.user.role),
       ...(issuePage
         ? { issue_page: { nextCursor: issuePage.nextCursor, limit: issuePage.items.length } }
         : {}),

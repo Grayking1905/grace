@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { Bootstrap } from '../shared/types';
+import type { OrganizationWork, OrganizationWorkKind } from '../shared/organization';
 export interface AppContextValue {
   data: Bootstrap;
   refresh: () => Promise<void>;
@@ -8,6 +9,8 @@ export interface AppContextValue {
   openIssue: (id: string) => void;
   openCreate: (defaults?: Record<string, unknown>) => void;
   openProjectCreate: () => void;
+  openCreateMenu?: () => void;
+  openWork?: (kind: OrganizationWorkKind, teamId?: string, item?: OrganizationWork) => void;
 }
 export const AppContext = createContext<AppContextValue | null>(null);
 export function useGrace() {

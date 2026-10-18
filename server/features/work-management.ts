@@ -6,7 +6,7 @@ import { projectTemplates, type IssueTemplate } from '../../shared/templates.js'
 import { canAdmin, canWrite, HttpError } from '../auth.js';
 import { sanitizeRichText } from '../richtext.js';
 import { id, now } from '../seed.js';
-import type {createNotifications} from './notifications.js';
+import type { createNotifications } from './notifications.js';
 type Context = {
   app: Express;
   db: Database;
@@ -22,7 +22,7 @@ type Context = {
     after: unknown,
   ) => Promise<void>;
   broadcast: (req: Request) => void;
-  notify:ReturnType<typeof createNotifications>;
+  notify: ReturnType<typeof createNotifications>;
 };
 const defaults = z
   .object({
@@ -257,8 +257,19 @@ export function registerWorkManagementRoutes({
       ])
         if (before !== after) await addHistory(req, current.id, String(field), before, after);
       await audit(req, 'issue.moved', current.id, JSON.stringify({ from: current.key, to: key }));
-      const watchers=await db.all<{user_id:string}>('SELECT user_id FROM watchers WHERE issue_id=? AND workspace_id=?',[current.id,req.workspaceId]);
-      for(const watcher of watchers)await notify(req,watcher.user_id,current.id,`${current.key} moved to ${key}`,current.summary,'move');
+      const watchers = await db.all<{ user_id: string }>(
+        'SELECT user_id FROM watchers WHERE issue_id=? AND workspace_id=?',
+        [current.id, req.workspaceId],
+      );
+      for (const watcher of watchers)
+        await notify(
+          req,
+          watcher.user_id,
+          current.id,
+          `${current.key} moved to ${key}`,
+          current.summary,
+          'move',
+        );
       return issue(req, current.id);
     });
     broadcast(req);

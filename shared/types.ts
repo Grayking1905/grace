@@ -9,6 +9,10 @@ export interface User {
   email_verified?: boolean;
   verification_required?: boolean;
   active?: boolean | number;
+  employee_id?: string;
+  team_id?: string;
+  team_role?: import('./organization').TeamRole;
+  team_permissions?: import('./organization').TeamCapability[];
 }
 export interface Workspace {
   id: string;
@@ -155,6 +159,7 @@ export interface Risk {
   created_at: string;
 }
 export interface Bootstrap {
+  organization?: import('./organization').OrganizationContext;
   user: User;
   workspace: Workspace;
   members: User[];
