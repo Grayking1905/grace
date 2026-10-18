@@ -1,6 +1,7 @@
 // Portable relational schema. Types and parameters work on SQLite and MySQL 8+.
 // Schema changes must be versioned here; never mutate existing migrations.
 import { expansionTables } from './expansion-schema.js';
+import { organizationTables } from './organization-schema.js';
 export const tables: Record<string, string> = {
   schema_migrations: `version INTEGER PRIMARY KEY, applied_at VARCHAR(32) NOT NULL`,
   workspaces: `id VARCHAR(64) PRIMARY KEY, name VARCHAR(120) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, created_at VARCHAR(32) NOT NULL`,
@@ -32,6 +33,7 @@ export const tables: Record<string, string> = {
   sprint_snapshots: `sprint_id VARCHAR(64) NOT NULL, phase VARCHAR(10) NOT NULL, workspace_id VARCHAR(64) NOT NULL, total_issues INTEGER NOT NULL, completed_issues INTEGER NOT NULL, total_points INTEGER NOT NULL, completed_points INTEGER NOT NULL, recorded_at VARCHAR(32) NOT NULL, PRIMARY KEY(sprint_id,phase), FOREIGN KEY(sprint_id) REFERENCES sprints(id)`,
   sprint_issue_snapshots: `sprint_id VARCHAR(64) NOT NULL, phase VARCHAR(10) NOT NULL, workspace_id VARCHAR(64) NOT NULL, issue_id VARCHAR(64) NOT NULL, issue_key VARCHAR(32) NOT NULL, summary VARCHAR(255) NOT NULL, status_id VARCHAR(64) NOT NULL, story_points INTEGER NOT NULL, category VARCHAR(20) NOT NULL, PRIMARY KEY(sprint_id,phase,issue_id), FOREIGN KEY(sprint_id) REFERENCES sprints(id), FOREIGN KEY(issue_id) REFERENCES issues(id)`,
   ...expansionTables,
+  ...organizationTables,
 };
 export const indexes = [
   ['issues_workspace_project', 'issues', 'workspace_id,project_id,deleted_at'],
@@ -47,4 +49,6 @@ export const indexes = [
   ['account_tokens_user', 'account_tokens', 'user_id,purpose,expires_at'],
   ['deliveries_user', 'mail_deliveries', 'user_id,created_at'],
   ['issue_templates_workspace', 'issue_templates', 'workspace_id,project_id'],
+  ['employee_team', 'employee_profiles', 'workspace_id,team_id'],
+  ['organization_work_team', 'organization_work', 'workspace_id,team_id,kind,state'],
 ];

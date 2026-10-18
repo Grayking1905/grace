@@ -228,8 +228,11 @@ export function registerAccountRoutes(ctx: {
     if (userId === req.user.id)
       throw new HttpError(409, 'You cannot deactivate your own membership.');
     await db.transaction(async () => {
-      await db.run('UPDATE users SET name=name WHERE id=?',[userId]);
-      await db.run('UPDATE memberships SET role=role WHERE workspace_id=? AND user_id=?',[req.workspaceId,userId]);
+      await db.run('UPDATE users SET name=name WHERE id=?', [userId]);
+      await db.run('UPDATE memberships SET role=role WHERE workspace_id=? AND user_id=?', [
+        req.workspaceId,
+        userId,
+      ]);
       const member = await db.one<{ role: string }>(
         'SELECT role FROM memberships WHERE workspace_id=? AND user_id=?',
         [req.workspaceId, userId],

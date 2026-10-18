@@ -4,6 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type { Database } from './db.js';
 import type { User } from '../shared/types.js';
 import { id, now } from './seed.js';
+import { ensureOrganization, organizationContext } from './organization.js';
 
 export class HttpError extends Error {
   constructor(
@@ -56,31 +57,35 @@ export async function createSession(
   userId: string,
   workspaceId: string,
 ) {
-  return db.transaction(async()=>{
-  await db.run('UPDATE users SET name=name WHERE id=?',[userId]);
-  await db.run('UPDATE memberships SET role=role WHERE workspace_id=? AND user_id=?',[workspaceId,userId]);
-  if (
-    !(await db.one(
-      'SELECT m.user_id FROM memberships m WHERE m.user_id=? AND m.workspace_id=? AND NOT EXISTS (SELECT 1 FROM member_deactivations md WHERE md.workspace_id=m.workspace_id AND md.user_id=m.user_id)',
-      [userId, workspaceId],
-    ))
-  )
-    throw new HttpError(403, 'This membership is inactive.');
-  const refresh = randomBytes(48).toString('hex');
-  const sessionId = id();
-  await db.insert('sessions', {
-    id: sessionId,
-    user_id: userId,
-    workspace_id: workspaceId,
-    refresh_hash: hash(refresh),
-    expires_at: new Date(Date.now() + 7 * 86400_000).toISOString(),
-    created_at: now(),
-  });
-  accessCookie(res, userId, workspaceId, sessionId);
-  res.cookie('grace_refresh', refresh, {
-    ...cookieOptions,
-    maxAge: 7 * 86400_000,
-  });
+  return db.transaction(async () => {
+    await ensureOrganization(db, workspaceId);
+    await db.run('UPDATE users SET name=name WHERE id=?', [userId]);
+    await db.run('UPDATE memberships SET role=role WHERE workspace_id=? AND user_id=?', [
+      workspaceId,
+      userId,
+    ]);
+    if (
+      !(await db.one(
+        'SELECT m.user_id FROM memberships m WHERE m.user_id=? AND m.workspace_id=? AND NOT EXISTS (SELECT 1 FROM member_deactivations md WHERE md.workspace_id=m.workspace_id AND md.user_id=m.user_id)',
+        [userId, workspaceId],
+      ))
+    )
+      throw new HttpError(403, 'This membership is inactive.');
+    const refresh = randomBytes(48).toString('hex');
+    const sessionId = id();
+    await db.insert('sessions', {
+      id: sessionId,
+      user_id: userId,
+      workspace_id: workspaceId,
+      refresh_hash: hash(refresh),
+      expires_at: new Date(Date.now() + 7 * 86400_000).toISOString(),
+      created_at: now(),
+    });
+    accessCookie(res, userId, workspaceId, sessionId);
+    res.cookie('grace_refresh', refresh, {
+      ...cookieOptions,
+      maxAge: 7 * 86400_000,
+    });
   });
 }
 export function clearCookies(res: Response) {
@@ -112,9 +117,15 @@ export async function resolveUser(db: Database, token?: string) {
   );
   if (!user) throw new HttpError(403, 'You do not have access to this workspace.');
   const { verified_at, ...profile } = user as User & { verified_at: string | null };
+  const organization = await organizationContext(db, payload.wid, payload.sub, profile.role);
   return {
     user: {
       ...profile,
+      employee_id: organization.employee?.employee_id,
+      team_id: organization.employee?.team_id,
+      team_role: organization.employee?.team_role,
+      team_permissions: organization.teams.find((t) => t.id === organization.employee?.team_id)
+        ?.permissions[organization.employee?.team_role || 'member'],
       email_verified: !!verified_at,
       verification_required: production || process.env.AUTH_REQUIRE_VERIFIED === 'true',
     },
@@ -136,6 +147,8 @@ export function canWrite(req: Request) {
     throw new HttpError(403, 'Verify your email before making changes.', 'EMAIL_UNVERIFIED');
   if (req.user.role === 'viewer')
     throw new HttpError(403, 'Viewers can browse work but cannot make changes.', 'FORBIDDEN');
+  if (!['owner', 'admin'].includes(req.user.role) && req.user.team_role === 'viewer')
+    throw new HttpError(403, 'Your team role has view-only access.', 'FORBIDDEN');
 }
 export function canAdmin(req: Request) {
   canWrite(req);

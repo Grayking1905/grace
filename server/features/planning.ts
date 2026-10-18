@@ -4,7 +4,7 @@ import type { Database } from '../db.js';
 import { canAdmin, canWrite, HttpError } from '../auth.js';
 import { id, now } from '../seed.js';
 import { requireActiveMember } from './accounts.js';
-import type {createNotifications} from './notifications.js';
+import type { createNotifications } from './notifications.js';
 import type { Issue, Project, Sprint, Status } from '../../shared/types.js';
 import type {
   ProjectModule,
@@ -29,7 +29,7 @@ export interface PlanningContext {
   ): Promise<void>;
   audit(req: Request, action: string, target: string, detail?: string): Promise<void>;
   broadcast(req: Request): void;
-  notify:ReturnType<typeof createNotifications>;
+  notify: ReturnType<typeof createNotifications>;
 }
 
 const moduleSchema = z
@@ -434,7 +434,14 @@ export function registerPlanningRoutes(ctx: PlanningContext) {
             body.changes.assignee_id !== current.assignee_id &&
             body.changes.assignee_id !== req.user.id
           )
-            await ctx.notify(req,body.changes.assignee_id,current.id,`${current.key} was assigned to you`,current.summary,'assignment');
+            await ctx.notify(
+              req,
+              body.changes.assignee_id,
+              current.id,
+              `${current.key} was assigned to you`,
+              current.summary,
+              'assignment',
+            );
           if (body.changes.status_id && body.changes.status_id !== current.status_id) {
             const watchers = await db.all<{ user_id: string }>(
               'SELECT user_id FROM watchers WHERE issue_id = ? AND workspace_id = ?',
@@ -444,7 +451,14 @@ export function registerPlanningRoutes(ctx: PlanningContext) {
               body.changes.status_id,
             ]);
             for (const watcher of watchers.filter((watcher) => watcher.user_id !== req.user.id))
-              await ctx.notify(req,watcher.user_id,current.id,`${current.key} moved to ${status!.name}`,current.summary,'status');
+              await ctx.notify(
+                req,
+                watcher.user_id,
+                current.id,
+                `${current.key} moved to ${status!.name}`,
+                current.summary,
+                'status',
+              );
           }
           updated.push(await issue(req, current.id));
         }

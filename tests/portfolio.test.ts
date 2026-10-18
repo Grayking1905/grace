@@ -15,15 +15,12 @@ beforeAll(async () => {
   owner = request.agent(app.app);
   outsider = request.agent(app.app);
   await owner.post('/api/v1/auth/demo').set(csrf);
-  await outsider
-    .post('/api/v1/auth/register')
-    .set(csrf)
-    .send({
-      email: 'portfolio-outside@example.test',
-      name: 'Other person',
-      workspace: 'Another team',
-      password: 'PortfolioPassword2026!',
-    });
+  await outsider.post('/api/v1/auth/register').set(csrf).send({
+    email: 'portfolio-outside@example.test',
+    name: 'Other person',
+    workspace: 'Another team',
+    password: 'PortfolioPassword2026!',
+  });
 });
 afterAll(async () => {
   await app.accounts.flush();

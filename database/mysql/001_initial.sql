@@ -366,6 +366,222 @@ CREATE TABLE IF NOT EXISTS sprint_issue_snapshots (
   FOREIGN KEY(issue_id) REFERENCES issues(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS module_members (
+  module_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  workspace_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY(module_id,user_id),
+  FOREIGN KEY(module_id) REFERENCES project_modules(id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS module_dependencies (
+  module_id VARCHAR(64) NOT NULL,
+  depends_on_id VARCHAR(64) NOT NULL,
+  workspace_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY(module_id,depends_on_id),
+  FOREIGN KEY(module_id) REFERENCES project_modules(id),
+  FOREIGN KEY(depends_on_id) REFERENCES project_modules(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS initiatives (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  description TEXT NOT NULL,
+  state VARCHAR(20) NOT NULL,
+  lead_id VARCHAR(64),
+  target_date VARCHAR(32) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_by VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(lead_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS initiative_modules (
+  initiative_id VARCHAR(64) NOT NULL,
+  module_id VARCHAR(64) NOT NULL,
+  workspace_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY(initiative_id,module_id),
+  FOREIGN KEY(initiative_id) REFERENCES initiatives(id),
+  FOREIGN KEY(module_id) REFERENCES project_modules(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS cycle_retrospectives (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  sprint_id VARCHAR(64) NOT NULL,
+  author_id VARCHAR(64) NOT NULL,
+  went_well TEXT NOT NULL,
+  improve TEXT NOT NULL,
+  actions TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_at VARCHAR(32) NOT NULL,
+  UNIQUE(sprint_id,author_id),
+  FOREIGN KEY(sprint_id) REFERENCES sprints(id),
+  FOREIGN KEY(author_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS account_security (
+  user_id VARCHAR(64) PRIMARY KEY,
+  verified_at VARCHAR(32),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS account_tokens (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  purpose VARCHAR(20) NOT NULL,
+  token_hash VARCHAR(128) NOT NULL UNIQUE,
+  expires_at VARCHAR(32) NOT NULL,
+  consumed_at VARCHAR(32),
+  created_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS mail_deliveries (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  kind VARCHAR(30) NOT NULL,
+  state VARCHAR(20) NOT NULL,
+  error_code VARCHAR(80) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS member_deactivations (
+  workspace_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  actor_id VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  PRIMARY KEY(workspace_id,user_id),
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  workspace_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  event VARCHAR(30) NOT NULL,
+  in_app INTEGER NOT NULL,
+  email INTEGER NOT NULL,
+  PRIMARY KEY(workspace_id,user_id,event),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS comment_mentions (
+  workspace_id VARCHAR(64) NOT NULL,
+  comment_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY(comment_id,user_id),
+  FOREIGN KEY(comment_id) REFERENCES comments(id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS issue_aliases (
+  workspace_id VARCHAR(64) NOT NULL,
+  alias_key VARCHAR(32) NOT NULL,
+  issue_id VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  PRIMARY KEY(workspace_id,alias_key),
+  FOREIGN KEY(issue_id) REFERENCES issues(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS issue_templates (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64),
+  name VARCHAR(120) NOT NULL,
+  description TEXT NOT NULL,
+  defaults_json TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_by VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(project_id) REFERENCES projects(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS project_configuration (
+  project_id VARCHAR(64) PRIMARY KEY,
+  issue_types TEXT NOT NULL,
+  default_type VARCHAR(20) NOT NULL,
+  cycles_enabled INTEGER NOT NULL,
+  FOREIGN KEY(project_id) REFERENCES projects(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS organization_teams (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(100) NOT NULL,
+  description TEXT NOT NULL,
+  color VARCHAR(20) NOT NULL,
+  sections TEXT NOT NULL,
+  permissions TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  UNIQUE(workspace_id,slug),
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS employee_profiles (
+  workspace_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  employee_id VARCHAR(40) NOT NULL,
+  team_id VARCHAR(64) NOT NULL,
+  team_role VARCHAR(20) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY(workspace_id,user_id),
+  UNIQUE(workspace_id,employee_id),
+  FOREIGN KEY(workspace_id,user_id) REFERENCES memberships(workspace_id,user_id),
+  FOREIGN KEY(team_id) REFERENCES organization_teams(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS employee_invites (
+  invite_id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  employee_id VARCHAR(40) NOT NULL,
+  team_id VARCHAR(64) NOT NULL,
+  team_role VARCHAR(20) NOT NULL,
+  FOREIGN KEY(invite_id) REFERENCES invites(id),
+  FOREIGN KEY(team_id) REFERENCES organization_teams(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS organization_work (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  team_id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64),
+  kind VARCHAR(20) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  content TEXT NOT NULL,
+  state VARCHAR(20) NOT NULL,
+  owner_id VARCHAR(64) NOT NULL,
+  due_date VARCHAR(32) NOT NULL,
+  version_tag VARCHAR(60) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_by VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(team_id) REFERENCES organization_teams(id),
+  FOREIGN KEY(project_id) REFERENCES projects(id),
+  FOREIGN KEY(owner_id) REFERENCES users(id),
+  FOREIGN KEY(created_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS organization_work_issues (
+  work_id VARCHAR(64) NOT NULL,
+  issue_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY(work_id,issue_id),
+  FOREIGN KEY(work_id) REFERENCES organization_work(id),
+  FOREIGN KEY(issue_id) REFERENCES issues(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE INDEX issues_workspace_project ON issues (workspace_id,project_id,deleted_at);
 CREATE INDEX issues_assignee ON issues (workspace_id,assignee_id);
 CREATE INDEX issues_sprint ON issues (sprint_id,status_id);
@@ -376,3 +592,8 @@ CREATE INDEX modules_workspace_project ON project_modules (workspace_id,project_
 CREATE INDEX module_issues_issue ON module_issues (workspace_id,issue_id);
 CREATE INDEX planning_baselines_project ON planning_baselines (workspace_id,project_id);
 CREATE INDEX sprint_snapshots_workspace ON sprint_snapshots (workspace_id,sprint_id);
+CREATE INDEX account_tokens_user ON account_tokens (user_id,purpose,expires_at);
+CREATE INDEX deliveries_user ON mail_deliveries (user_id,created_at);
+CREATE INDEX issue_templates_workspace ON issue_templates (workspace_id,project_id);
+CREATE INDEX employee_team ON employee_profiles (workspace_id,team_id);
+CREATE INDEX organization_work_team ON organization_work (workspace_id,team_id,kind,state);

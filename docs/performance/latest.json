@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-10-18T19:53:36.843Z",
+  "database": "MySQL 8.4.11",
+  "dataset_cards": 500,
+  "concurrency": 1,
+  "scope": "Local loopback API measurements, ten warm samples. Not a production load or cluster-scale validation.",
+  "measurements": [
+    {
+      "name": "paginated_bootstrap",
+      "p50_ms": 22.3,
+      "p95_ms": 35,
+      "response_bytes": 103692,
+      "samples": 10
+    },
+    {
+      "name": "search",
+      "p50_ms": 12.5,
+      "p95_ms": 17.6,
+      "response_bytes": 32045,
+      "samples": 10
+    },
+    {
+      "name": "report",
+      "p50_ms": 22,
+      "p95_ms": 25.9,
+      "response_bytes": 370,
+      "samples": 10
+    }
+  ],
+  "ui_render": "The built 500-card fixture mounted eight initial card elements. Virtualization verified in the browser; end-to-end rendering and drag latency were not measured."
+}

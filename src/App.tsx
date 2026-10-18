@@ -47,6 +47,21 @@ import { Editor } from './components/Editor';
 import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
 import { PublicAccountPage } from './pages/Accounts';
 import { projectTemplates } from '../shared/templates';
+import type { OrganizationWork, OrganizationWorkKind } from '../shared/organization';
+import { CreateHub, OrganizationWorkDialog } from './components/CreateHub';
+import './organization.css';
+const OrganizationHome = lazy(() =>
+  import('./pages/Organization').then((m) => ({ default: m.OrganizationHome })),
+);
+const TeamDashboard = lazy(() =>
+  import('./pages/Organization').then((m) => ({ default: m.TeamDashboard })),
+);
+const OrganizationAdministration = lazy(() =>
+  import('./pages/Organization').then((m) => ({ default: m.OrganizationAdministration })),
+);
+const MyWork = lazy(() =>
+  import('./pages/Organization').then((m) => ({ default: m.OrganizationMyWork })),
+);
 const TemplatesPage = lazy(() =>
   import('./pages/Templates').then((m) => ({ default: m.TemplatesPage })),
 );
@@ -60,7 +75,6 @@ const IssueDrawer = lazy(() =>
   import('./components/IssueDrawer').then((m) => ({ default: m.IssueDrawer })),
 );
 const Dashboard = lazy(() => import('./pages/Workspace').then((m) => ({ default: m.Dashboard })));
-const MyWork = lazy(() => import('./pages/Workspace').then((m) => ({ default: m.MyWork })));
 const Projects = lazy(() => import('./pages/Workspace').then((m) => ({ default: m.Projects })));
 const InboxPage = lazy(() => import('./pages/Workspace').then((m) => ({ default: m.InboxPage })));
 const ProjectPage = lazy(() => import('./pages/Project').then((m) => ({ default: m.ProjectPage })));
@@ -84,6 +98,9 @@ type Toast = {
 };
 export default function App() {
   const location = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
   const publicAccount = /^\/account\/(forgot|verify|reset)$/.test(location.pathname);
   const queryClient = useQueryClient();
   const bootstrap = useQuery({
@@ -94,6 +111,12 @@ export default function App() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createDefaults, setCreateDefaults] = useState<Record<string, unknown> | null>(null);
   const [projectCreate, setProjectCreate] = useState(false);
+  const [createMenu, setCreateMenu] = useState(false);
+  const [workDialog, setWorkDialog] = useState<{
+    kind: OrganizationWorkKind;
+    teamId?: string;
+    item?: OrganizationWork;
+  } | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -175,8 +198,7 @@ export default function App() {
       }
       if (e.key.toLowerCase() === 'c' && data?.user.role !== 'viewer') {
         e.preventDefault();
-        const pid = /projects\/([^/]+)/.exec(location.pathname)?.[1];
-        openCreate(pid ? { project_id: pid } : {});
+        setCreateMenu(true);
       }
       if (e.key === '?') {
         e.preventDefault();
@@ -225,6 +247,9 @@ export default function App() {
     openIssue,
     openCreate,
     openProjectCreate: () => setProjectCreate(true),
+    openCreateMenu: () => setCreateMenu(true),
+    openWork: (kind: OrganizationWorkKind, teamId?: string, item?: OrganizationWork) =>
+      setWorkDialog({ kind, teamId, item }),
   };
   return (
     <GraceProvider value={context}>
@@ -250,7 +275,10 @@ export default function App() {
           }
         >
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={data.organization ? <OrganizationHome /> : <Dashboard />} />
+            <Route path="/overview" element={<Dashboard />} />
+            <Route path="/teams/:teamId" element={<TeamDashboard />} />
+            <Route path="/organization" element={<OrganizationAdministration />} />
             <Route path="/invite" element={<InvitationAccept />} />
             <Route path="/my-work" element={<MyWork />} />
             <Route path="/inbox" element={<InboxPage />} />
@@ -271,6 +299,8 @@ export default function App() {
         </Suspense>
       </Shell>
       {createDefaults && <CreateIssue defaults={createDefaults} onClose={closeCreate} />}
+      {createMenu && <CreateHub onClose={() => setCreateMenu(false)} />}
+      {workDialog && <OrganizationWorkDialog {...workDialog} onClose={() => setWorkDialog(null)} />}
       {projectCreate && <CreateProject onClose={closeProjectCreate} />}
       {searchParams.get('issue') && (
         <Suspense
@@ -296,7 +326,7 @@ export default function App() {
         <Modal title="A few shortcuts. A little more flow." onClose={() => setHelpOpen(false)}>
           <div className="shortcut-list">
             {[
-              ['Create an issue', 'C'],
+              ['Open Create', 'C'],
               ['Search everything', 'Ctrl / ⌘ K'],
               ['Open search', '/'],
               ['Go to board', 'G then B'],
@@ -349,7 +379,7 @@ function Shell({
   openCommand: () => void;
   openHelp: () => void;
 }) {
-  const { data, run, openCreate, openProjectCreate } = useGrace();
+  const { data, run, openCreateMenu, openProjectCreate } = useGrace();
   const location = useLocation();
   const [mobile, setMobile] = useState(false);
   const [smallScreen, setSmallScreen] = useState(
@@ -378,11 +408,17 @@ function Shell({
       '/security': 'Account security',
       '/templates': 'Issue templates',
       '/portfolio': 'Portfolio',
+      '/organization': 'Organization',
+      '/overview': 'Workspace overview',
     }[location.pathname] ||
-    (location.pathname.startsWith('/pages') ? 'Pages' : 'Views');
+    (location.pathname.startsWith('/teams')
+      ? 'Team dashboard'
+      : location.pathname.startsWith('/pages')
+        ? 'Pages'
+        : 'Views');
   const unread = data.notifications.filter((n) => !n.read_at).length;
   const nav = [
-    { to: '/', label: 'Overview', icon: House },
+    { to: '/', label: data.organization?.can_admin ? 'Organization' : 'My dashboard', icon: House },
     { to: '/my-work', label: 'My work', icon: CircleCheck },
     { to: '/inbox', label: 'Inbox', icon: Inbox },
   ];
@@ -399,7 +435,7 @@ function Shell({
           <span>
             grace<span className="brand-period">.</span>
           </span>
-          <span className="brand-workspace">WORKSPACE</span>
+          <span className="brand-workspace">PLATFORM</span>
         </Link>
         <WorkspaceSwitcher />
         <button className="sidebar-search" onClick={openCommand}>
@@ -422,6 +458,29 @@ function Shell({
               </NavLink>
             ))}
           </div>
+          {data.organization && (
+            <>
+              <div className="nav-section-label">
+                <span>TEAM DASHBOARDS</span>
+                {data.organization.can_admin && (
+                  <Link to="/organization" aria-label="Manage team dashboards">
+                    <Settings size={14} />
+                  </Link>
+                )}
+              </div>
+              {data.organization.teams.map((team) => (
+                <NavLink
+                  to={`/teams/${team.id}`}
+                  className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                  key={team.id}
+                >
+                  <span className="project-dot" style={{ background: team.color }} />
+                  <span>{team.name}</span>
+                  <ChevronRight size={13} />
+                </NavLink>
+              ))}
+            </>
+          )}
           <div className="nav-section-label">
             <span>PROJECTS</span>
             <IconButton
@@ -472,16 +531,7 @@ function Shell({
               {n.to === '/manager' && <span className="small-new">NEW</span>}
             </NavLink>
           ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="sidebar-tip">
-            <Sparkles size={19} />
-            <strong>Good work starts with clarity.</strong>
-            <p>A shared space for your next big thing.</p>
-            <button onClick={openHelp}>
-              Find your flow <ArrowUpRight size={13} />
-            </button>
-          </div>
+          <div className="nav-section-label">ACCOUNT & ADMINISTRATION</div>
           <NavLink to="/settings" className="nav-item">
             <Settings size={17} />
             <span>Settings</span>
@@ -490,6 +540,12 @@ function Shell({
             <ShieldCheck size={17} />
             <span>Administration</span>
           </NavLink>
+          {data.organization?.can_admin && (
+            <NavLink to="/organization" className="nav-item">
+              <Users size={17} />
+              <span>Teams & privileges</span>
+            </NavLink>
+          )}
           <NavLink to="/security" className="nav-item">
             <ShieldCheck size={17} />
             <span>Security & alerts</span>
@@ -499,11 +555,13 @@ function Shell({
             <span>Help & shortcuts</span>
             <kbd>?</kbd>
           </button>
+        </nav>
+        <div className="sidebar-bottom">
           <div className="profile">
             <Avatar user={data.user} size={33} />
             <span>
               <strong>{data.user.name}</strong>
-              <small>{data.user.role === 'owner' ? 'Workspace owner' : data.user.role}</small>
+              <small title={data.user.employee_id}>{data.user.employee_id || data.user.role}</small>
             </span>
             <IconButton
               label="Sign out"
@@ -530,7 +588,7 @@ function Shell({
               <Menu size={20} />
             </button>
             <PanelLeftClose className="desktop-sidebar-icon" size={17} />
-            <span className="breadcrumb-workspace">Workspace</span>
+            <span className="breadcrumb-workspace">Organization</span>
             <ChevronRight size={13} />
             <strong>{title}</strong>
             {activeProject && <Badge>{activeProject.key}</Badge>}
@@ -543,12 +601,12 @@ function Shell({
             </button>
             <Button
               className="top-create"
-              aria-label="Create issue"
-              onClick={() => openCreate(activeProject ? { project_id: activeProject.id } : {})}
+              aria-label="Create"
+              onClick={openCreateMenu}
               disabled={data.user.role === 'viewer'}
             >
               <Plus size={16} />
-              <span>Create issue</span>
+              <span>Create</span>
             </Button>
             <Link to="/inbox" className="notification-icon" aria-label={`Inbox, ${unread} unread`}>
               <Inbox size={19} />
@@ -574,8 +632,9 @@ function Shell({
   );
 }
 
-function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
+export function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
   const [register, setRegister] = useState(false);
+  const [employeeLogin, setEmployeeLogin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [params] = useSearchParams();
@@ -584,9 +643,13 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
   const invite = useQuery({
     queryKey: ['invitation', inviteToken],
     queryFn: () =>
-      api<{ email: string; workspace: string }>(
-        `/auth/invite?token=${encodeURIComponent(inviteToken!)}`,
-      ),
+      api<{
+        email: string;
+        workspace: string;
+        employee_id?: string;
+        team?: string;
+        organization?: string;
+      }>(`/auth/invite?token=${encodeURIComponent(inviteToken!)}`),
     enabled: !!inviteToken,
   });
   const submit = async (e: FormEvent<HTMLFormElement>) => {
@@ -594,13 +657,14 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
     setError('');
     setBusy(true);
     const form = Object.fromEntries(new FormData(e.currentTarget));
+    if (!form.employee_id) delete form.employee_id;
     try {
       await post(register ? '/auth/register' : '/auth/login', {
         ...form,
         ...(register && inviteToken ? { invite_token: inviteToken } : {}),
       });
       await onSuccess();
-      if (register && inviteToken) navigate('/');
+      if (!inviteToken || register) navigate('/');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -613,6 +677,7 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
     try {
       await post('/auth/demo');
       await onSuccess();
+      navigate('/');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -673,11 +738,16 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
           <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
           <h2>{register ? 'Make room for good work.' : 'Welcome back.'}</h2>
           <p>
-            {register ? 'Create your own Grace workspace.' : 'A little clarity is waiting for you.'}
+            {register
+              ? inviteToken
+                ? 'Join your organization’s assigned team.'
+                : 'Create your Grace organization. Your admin dashboard is ready from day one.'
+              : 'Sign in to your organization and team dashboard.'}
           </p>
           {invite.data && (
             <div className="invite-note">
               You are invited to {invite.data.workspace} as {invite.data.email}.
+              {invite.data.team && ` Team: ${invite.data.team}.`}
             </div>
           )}
           {invite.error && <div className="form-error">{invite.error.message}</div>}
@@ -697,7 +767,7 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
                 </label>
                 {!inviteToken && (
                   <label>
-                    Workspace name
+                    Organization name
                     <input
                       name="workspace"
                       required
@@ -709,18 +779,71 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
                 )}
               </>
             )}
-            <label>
-              Email address
-              <input
-                name="email"
-                type="email"
-                required
-                autoComplete="email"
-                key={invite.data?.email || 'email'}
-                defaultValue={invite.data?.email}
-                placeholder="you@company.com"
-              />
-            </label>
+            {!register && (
+              <div className="login-methods" role="group" aria-label="Sign-in method">
+                <button
+                  type="button"
+                  className={!employeeLogin ? 'active' : ''}
+                  onClick={() => setEmployeeLogin(false)}
+                >
+                  Email
+                </button>
+                <button
+                  type="button"
+                  className={employeeLogin ? 'active' : ''}
+                  onClick={() => setEmployeeLogin(true)}
+                >
+                  Employee ID
+                </button>
+              </div>
+            )}
+            {(register || employeeLogin) && (
+              <label>
+                Employee ID{' '}
+                {register && !invite.data?.employee_id && (
+                  <small> · optional, assigned automatically</small>
+                )}
+                <input
+                  name="employee_id"
+                  key={invite.data?.employee_id || 'employee'}
+                  defaultValue={invite.data?.employee_id}
+                  readOnly={!!invite.data?.employee_id}
+                  required={!register || !!invite.data?.employee_id}
+                  minLength={2}
+                  maxLength={40}
+                  pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,39}"
+                  autoComplete="username"
+                  placeholder="e.g. ENG-1042"
+                />
+              </label>
+            )}
+            {!register && employeeLogin && (
+              <label>
+                Organization code
+                <input
+                  name="organization"
+                  required
+                  maxLength={120}
+                  placeholder="Your organization’s sign-in code"
+                  autoComplete="organization"
+                />
+                <small>Your administrator shares this code with your employee ID.</small>
+              </label>
+            )}
+            {(register || !employeeLogin) && (
+              <label>
+                Email address
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  key={invite.data?.email || 'email'}
+                  defaultValue={invite.data?.email}
+                  placeholder="you@company.com"
+                />
+              </label>
+            )}
             <label>
               Password
               <input
@@ -739,7 +862,8 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
               </div>
             )}
             <Button type="submit" busy={busy}>
-              {register ? 'Create workspace' : 'Sign in'} <ArrowUpRight size={16} />
+              {register ? (inviteToken ? 'Join organization' : 'Create organization') : 'Sign in'}{' '}
+              <ArrowUpRight size={16} />
             </Button>
           </form>
           {!register && <Link to="/account/forgot">Forgot your password?</Link>}
@@ -757,7 +881,7 @@ function Login({ onSuccess }: { onSuccess: () => Promise<void> }) {
                 setError('');
               }}
             >
-              {register ? 'Sign in' : 'Create a workspace'}
+              {register ? 'Sign in' : 'Register an organization / join by invitation'}
             </button>
           </p>
           <div className="login-trust">
@@ -827,7 +951,15 @@ function CreateIssue({
 }) {
   const { data, run, openIssue } = useGrace();
   const [projectId, setProjectId] = useState(
-    String(defaults.project_id || data.projects[0]?.id || ''),
+    String(
+      defaults.project_id ||
+        data.projects.find(
+          (p) =>
+            p.can_write !== false &&
+            (!defaults.type || p.issue_types?.includes(defaults.type as Issue['type']) !== false),
+        )?.id ||
+        '',
+    ),
   );
   const [description, setDescription] = useState(String(defaults.description || ''));
   const [busy, setBusy] = useState(false);
@@ -862,7 +994,15 @@ function CreateIssue({
     }
   };
   return (
-    <Modal title="Create an issue" onClose={onClose} wide>
+    <Modal
+      title={
+        defaults.creation_kind
+          ? `Create ${String(defaults.creation_kind).toLowerCase()}`
+          : 'Create an issue'
+      }
+      onClose={onClose}
+      wide
+    >
       {!data.projects.length ? (
         <div className="modal-body">
           <p>Create your first project before adding an issue.</p>
@@ -874,11 +1014,13 @@ function CreateIssue({
               <label>
                 Project
                 <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                  {data.projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {p.key}
-                    </option>
-                  ))}
+                  {data.projects
+                    .filter((p) => p.can_write !== false)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.key}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label>
@@ -990,7 +1132,11 @@ function CreateIssue({
                 <input
                   name="labels"
                   placeholder="Design, Frontend"
-                  defaultValue={Array.isArray(defaults.labels) ? defaults.labels.join(', ') : ''}
+                  defaultValue={
+                    Array.isArray(defaults.labels)
+                      ? defaults.labels.join(', ')
+                      : String(defaults.labels || '')
+                  }
                 />
               </label>
               <label>
@@ -1019,7 +1165,9 @@ function CreateIssue({
             </Button>
             <Button busy={busy} type="submit">
               <Plus size={15} />
-              Create issue
+              {defaults.creation_kind
+                ? `Create ${String(defaults.creation_kind).toLowerCase()}`
+                : 'Create issue'}
             </Button>
           </div>
         </form>

@@ -602,14 +602,12 @@ export function IssueTable({ issues, compact = false }: { issues: Issue[]; compa
     getItemKey: (index) => sorted[index].id,
   });
   const visibleRows = windowRows
-    ? virtualizer
-        .getVirtualItems()
-        .map((row) => ({
-          issue: sorted[row.index],
-          index: row.index,
-          start: row.start,
-          end: row.end,
-        }))
+    ? virtualizer.getVirtualItems().map((row) => ({
+        issue: sorted[row.index],
+        index: row.index,
+        start: row.start,
+        end: row.end,
+      }))
     : sorted.map((issue, index) => ({ issue, index, start: 0, end: 0 }));
   if (!issues.length)
     return (

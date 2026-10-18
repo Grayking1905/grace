@@ -33,15 +33,12 @@ beforeAll(async () => {
   memberCookie = (member.headers['set-cookie'] as unknown as string[])
     .map((c) => c.split(';')[0])
     .join('; ');
-  await outsider
-    .post('/api/v1/auth/register')
-    .set(csrf)
-    .send({
-      email: 'file-outside@example.test',
-      name: 'File outsider',
-      workspace: 'Other files',
-      password: 'AttachmentPassword2026!',
-    });
+  await outsider.post('/api/v1/auth/register').set(csrf).send({
+    email: 'file-outside@example.test',
+    name: 'File outsider',
+    workspace: 'Other files',
+    password: 'AttachmentPassword2026!',
+  });
   await new Promise<void>((done) => app.httpServer.listen(0, '127.0.0.1', () => done()));
   origin = `http://127.0.0.1:${(app.httpServer.address() as { port: number }).port}`;
 });

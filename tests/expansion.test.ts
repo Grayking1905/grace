@@ -39,15 +39,12 @@ describe('Account identity and membership lifecycle', () => {
     const user = request.agent(instance.app);
     expect(
       (
-        await user
-          .post('/api/v1/auth/register')
-          .set(csrf)
-          .send({
-            email: 'verification@example.test',
-            name: 'Verification User',
-            workspace: 'Private testing',
-            password: 'StrongPassword2026!',
-          })
+        await user.post('/api/v1/auth/register').set(csrf).send({
+          email: 'verification@example.test',
+          name: 'Verification User',
+          workspace: 'Private testing',
+          password: 'StrongPassword2026!',
+        })
       ).status,
     ).toBe(201);
     await instance.accounts.flush();
@@ -126,14 +123,11 @@ describe('Account identity and membership lifecycle', () => {
     ).toBe(403);
     expect(
       (
-        await owner
-          .post('/api/v1/issues')
-          .set(csrf)
-          .send({
-            project_id: 'project-platform',
-            summary: 'Invalid assignment',
-            assignee_id: 'user-james',
-          })
+        await owner.post('/api/v1/issues').set(csrf).send({
+          project_id: 'project-platform',
+          summary: 'Invalid assignment',
+          assignee_id: 'user-james',
+        })
       ).status,
     ).toBe(400);
     expect((await owner.post('/api/v1/members/user-alex/deactivate').set(csrf)).status).toBe(409);
@@ -197,15 +191,12 @@ describe('Reusable work and planning', () => {
     expect(created.body.defaults.description).not.toContain('<script');
     expect(
       (
-        await owner
-          .patch(`/api/v1/issue-templates/${created.body.id}`)
-          .set(csrf)
-          .send({
-            name: 'Updated brief',
-            description: 'For defects',
-            defaults: created.body.defaults,
-            version: 1,
-          })
+        await owner.patch(`/api/v1/issue-templates/${created.body.id}`).set(csrf).send({
+          name: 'Updated brief',
+          description: 'For defects',
+          defaults: created.body.defaults,
+          version: 1,
+        })
       ).status,
     ).toBe(200);
     expect(
