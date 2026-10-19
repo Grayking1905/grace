@@ -582,6 +582,39 @@ CREATE TABLE IF NOT EXISTS organization_work_issues (
   FOREIGN KEY(issue_id) REFERENCES issues(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS project_team_settings (
+  project_id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY(project_id) REFERENCES projects(id),
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS project_team_assignments (
+  workspace_id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64) NOT NULL,
+  team_id VARCHAR(64) NOT NULL,
+  PRIMARY KEY(project_id,team_id),
+  FOREIGN KEY(project_id) REFERENCES projects(id),
+  FOREIGN KEY(team_id) REFERENCES organization_teams(id),
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS home_events (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  actor_id VARCHAR(64) NOT NULL,
+  action VARCHAR(100) NOT NULL,
+  entity_type VARCHAR(32) NOT NULL,
+  entity_id VARCHAR(64) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  project_id VARCHAR(64),
+  team_id VARCHAR(64),
+  created_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(actor_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE INDEX issues_workspace_project ON issues (workspace_id,project_id,deleted_at);
 CREATE INDEX issues_assignee ON issues (workspace_id,assignee_id);
 CREATE INDEX issues_sprint ON issues (sprint_id,status_id);
@@ -597,3 +630,7 @@ CREATE INDEX deliveries_user ON mail_deliveries (user_id,created_at);
 CREATE INDEX issue_templates_workspace ON issue_templates (workspace_id,project_id);
 CREATE INDEX employee_team ON employee_profiles (workspace_id,team_id);
 CREATE INDEX organization_work_team ON organization_work (workspace_id,team_id,kind,state);
+CREATE INDEX home_events_cursor ON home_events (workspace_id,created_at,id);
+CREATE INDEX home_events_team ON home_events (workspace_id,team_id,created_at);
+CREATE INDEX home_events_actor ON home_events (workspace_id,actor_id,action,created_at);
+CREATE INDEX project_teams_team ON project_team_assignments (workspace_id,team_id,project_id);

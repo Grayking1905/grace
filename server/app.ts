@@ -27,6 +27,13 @@ import { applySearchMigration, registerSearchRoutes, queryIssuePage } from './fe
 import { applyPortfolioMigration, registerPortfolioRoutes } from './features/portfolio.js';
 import { applyOrganizationMigration, organizationContext } from './organization.js';
 import {
+  applyHomeMigration,
+  recordSignIn,
+  recordIssueEvent,
+  recordAuditEvent,
+} from './home-events.js';
+import { registerHomeRoutes } from './features/home.js';
+import {
   registerOrganizationRoutes,
   employeeIdSchema,
   teamRoleSchema,
@@ -101,6 +108,7 @@ export async function createApp(
   await applySearchMigration(db);
   await applyPortfolioMigration(db);
   await applyOrganizationMigration(db);
+  await applyHomeMigration(db);
   const accounts = createAccounts(db, options.mailer);
   const dispatchNotification = createNotifications(db, accounts);
   const app = express();
@@ -207,7 +215,9 @@ export async function createApp(
       if (current?.password_hash !== user.password_hash)
         throw new HttpError(401, 'Your credentials changed. Sign in again.');
       await createSession(db, res, user.id, membership.workspace_id);
+      await recordSignIn(db, user.id, membership.workspace_id);
     });
+    io.to(`workspace:${membership.workspace_id}`).emit('workspace.updated');
     res.json({ ok: true });
   });
   app.post('/api/v1/auth/register', authLimit, async (req, res) => {
@@ -266,6 +276,7 @@ export async function createApp(
       });
       if (invite) await claimEmployeeInvite(db, workspaceId, userId, invite.id, body.employee_id);
       await createSession(db, res, userId, workspaceId);
+      await recordSignIn(db, userId, workspaceId, 'member.joined');
       if (!invite && body.employee_id)
         await db.run(
           'UPDATE employee_profiles SET employee_id=? WHERE workspace_id=? AND user_id=?',
@@ -273,12 +284,17 @@ export async function createApp(
         );
     });
     await accounts.issueToken(userId, 'verify');
+    io.to(`workspace:${workspaceId}`).emit('workspace.updated');
     res.status(201).json({ ok: true, verification_sent: true });
   });
   app.post('/api/v1/auth/demo', authLimit, async (_req, res) => {
     if (!demoEnabled || !(await db.one('SELECT id FROM users WHERE id = ?', [demoUser])))
       throw new HttpError(404, 'Demo login is disabled.');
-    await createSession(db, res, demoUser, demoWorkspace);
+    await db.transaction(async () => {
+      await createSession(db, res, demoUser, demoWorkspace);
+      await recordSignIn(db, demoUser, demoWorkspace);
+    });
+    io.to(`workspace:${demoWorkspace}`).emit('workspace.updated');
     res.json({ ok: true });
   });
   app.post('/api/v1/auth/refresh', authLimit, async (req, res) => {
@@ -304,7 +320,13 @@ export async function createApp(
     }
   });
   app.post('/api/v1/auth/logout', async (req, res) => {
-    await db.run('DELETE FROM sessions WHERE id = ?', [req.sessionId]);
+    await db.transaction(async () => {
+      await recordSignIn(db, req.user.id, req.workspaceId, 'auth.logout');
+      await db.run('DELETE FROM sessions WHERE id = ?', [req.sessionId]);
+    });
+    for (const socket of io.sockets.sockets.values())
+      if (socket.data.sessionId === req.sessionId) socket.disconnect(true);
+    broadcast(req);
     clearCookies(res);
     res.json({ ok: true });
   });
@@ -484,6 +506,7 @@ export async function createApp(
       detail,
       created_at: now(),
     });
+    await recordAuditEvent(db, req, action, target);
   }
   function broadcast(req: Request) {
     io.to(`workspace:${req.workspaceId}`).emit('workspace.updated');
@@ -505,6 +528,7 @@ export async function createApp(
       new_value: typeof newValue === 'string' ? newValue : JSON.stringify(newValue ?? ''),
       created_at: now(),
     });
+    await recordIssueEvent(db, req, issueId, field);
   }
   async function notify(
     req: Request,
@@ -669,6 +693,20 @@ export async function createApp(
   registerSearchRoutes(app, db);
   registerPortfolioRoutes({ app, db, project, visibleProjects, audit, broadcast });
   registerOrganizationRoutes({ app, db, project, issue, visibleProjects, audit, broadcast });
+  registerHomeRoutes({
+    app,
+    db,
+    project,
+    visibleProjects,
+    audit,
+    broadcast,
+    online: (workspaceId) =>
+      new Set(
+        [...io.sockets.sockets.values()]
+          .filter((s) => s.data.workspaceId === workspaceId && s.connected)
+          .map((s) => s.data.user.id),
+      ),
+  });
   app.get('/api/v1/bootstrap', async (req, res) => {
     const issuePage =
       req.query.issue_limit !== undefined
@@ -1059,6 +1097,7 @@ export async function createApp(
       user_id: req.user.id,
       created_at: now(),
     });
+    await recordIssueEvent(db, req, current.id, 'worklog');
     broadcast(req);
     res.status(201).json({ ok: true });
   });
@@ -1077,7 +1116,7 @@ export async function createApp(
         'SELECT id FROM issue_links WHERE source_id = ? AND target_id = ? AND type = ?',
         [current.id, target.id, body.type],
       ))
-    )
+    ) {
       await db.insert('issue_links', {
         id: id(),
         workspace_id: req.workspaceId,
@@ -1085,6 +1124,8 @@ export async function createApp(
         target_id: target.id,
         type: body.type,
       });
+      await recordIssueEvent(db, req, current.id, 'link');
+    }
     broadcast(req);
     res.status(201).json({ ok: true });
   });
@@ -1119,6 +1160,7 @@ export async function createApp(
         size: req.file.size,
         created_at: now(),
       });
+      await recordIssueEvent(db, req, current.id, 'attachment');
       broadcast(req);
       res.status(201).json({ id: attachmentId });
     },
@@ -1157,6 +1199,7 @@ export async function createApp(
       workspace_id: req.workspaceId,
       state: 'future',
     });
+    await audit(req, 'sprint.created', sprintId);
     broadcast(req);
     res.status(201).json({ id: sprintId });
   });
@@ -1300,6 +1343,7 @@ export async function createApp(
       status.id,
       req.workspaceId,
     ]);
+    await audit(req, 'status.updated', status.id);
     broadcast(req);
     res.json({ ok: true });
   });
@@ -1354,6 +1398,7 @@ export async function createApp(
       author_id: req.user.id,
       updated_at: now(),
     });
+    await audit(req, 'page.created', pageId);
     broadcast(req);
     res.status(201).json({ id: pageId });
   });
@@ -1405,6 +1450,7 @@ export async function createApp(
           'This page has changed. Reload it before saving.',
           'EDIT_CONFLICT',
         );
+      await audit(req, 'page.updated', page.id);
       return db.one('SELECT * FROM pages WHERE id = ? AND workspace_id = ?', [
         page.id,
         req.workspaceId,
@@ -1476,13 +1522,15 @@ export async function createApp(
         blockers: z.string().max(4000).default(''),
       })
       .parse(req.body);
+    const standupId = id();
     await db.insert('standups', {
       ...body,
-      id: id(),
+      id: standupId,
       workspace_id: req.workspaceId,
       user_id: req.user.id,
       created_at: now(),
     });
+    await audit(req, 'standup.created', standupId);
     broadcast(req);
     res.status(201).json({ ok: true });
   });
@@ -1496,14 +1544,16 @@ export async function createApp(
       })
       .parse(req.body);
     if (body.project_id) await project(req, body.project_id, true);
+    const riskId = id();
     await db.insert('risks', {
       ...body,
-      id: id(),
+      id: riskId,
       workspace_id: req.workspaceId,
       state: 'open',
       owner_id: req.user.id,
       created_at: now(),
     });
+    await audit(req, 'risk.created', riskId);
     broadcast(req);
     res.status(201).json({ ok: true });
   });
@@ -1521,6 +1571,7 @@ export async function createApp(
       String(req.params.id),
       req.workspaceId,
     ]);
+    await audit(req, 'risk.updated', String(req.params.id));
     broadcast(req);
     res.json({ ok: true });
   });
@@ -1689,17 +1740,21 @@ export async function createApp(
   });
   io.on('connection', (socket) => {
     socket.join(`workspace:${socket.data.workspaceId}`);
+    io.to(`workspace:${socket.data.workspaceId}`).emit('presence.updated');
     // Revalidate session and membership periodically; revoked sessions lose updates.
     const timer = setInterval(async () => {
-      const session = await db
-        .one('SELECT id FROM sessions WHERE id = ? AND expires_at > ?', [
-          socket.data.sessionId,
-          now(),
-        ])
+      const active = await db
+        .one(
+          'SELECT s.id FROM sessions s JOIN memberships m ON m.workspace_id=s.workspace_id AND m.user_id=s.user_id WHERE s.id=? AND s.expires_at>? AND NOT EXISTS(SELECT 1 FROM member_deactivations md WHERE md.workspace_id=s.workspace_id AND md.user_id=s.user_id)',
+          [socket.data.sessionId, now()],
+        )
         .catch(() => undefined);
-      if (!session) socket.disconnect(true);
+      if (!active) socket.disconnect(true);
     }, 30000);
-    socket.on('disconnect', () => clearInterval(timer));
+    socket.on('disconnect', () => {
+      clearInterval(timer);
+      io.to(`workspace:${socket.data.workspaceId}`).emit('presence.updated');
+    });
   });
   return { app, httpServer, io, db, accounts };
 }

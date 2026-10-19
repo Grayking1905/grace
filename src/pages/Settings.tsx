@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import {
   Settings,
+  Users,
   Database,
   ShieldCheck,
   Upload,
@@ -80,11 +82,40 @@ export function SettingsPage() {
     <div className="page settings-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">MAKE YOURSELF AT HOME</span>
-          <h1>A workspace that works for you.</h1>
-          <p>A few thoughtful details make all the difference.</p>
+          <h1>Settings</h1>
+          <p>Your profile, team access, and workspace preferences.</p>
         </div>
       </div>
+      <nav className="settings-shortcuts" aria-label="Settings areas">
+        {(admin || data.organization?.can_manage_team) && (
+          <Link to="/organization">
+            <Users size={21} />
+            <span>
+              <strong>{admin ? 'Teams & roles' : 'Manage my team'}</strong>
+              <small>People, dashboards and team permissions</small>
+            </span>
+            <ArrowUpRight size={16} />
+          </Link>
+        )}
+        <Link to="/security">
+          <ShieldCheck size={21} />
+          <span>
+            <strong>Security & notifications</strong>
+            <small>Email verification, sessions and alerts</small>
+          </span>
+          <ArrowUpRight size={16} />
+        </Link>
+        {admin && (
+          <Link to="/administration">
+            <History size={21} />
+            <span>
+              <strong>Administration</strong>
+              <small>Invitations, accounts and recovery</small>
+            </span>
+            <ArrowUpRight size={16} />
+          </Link>
+        )}
+      </nav>
       <div className="settings-layout">
         <aside>
           {[
@@ -92,16 +123,18 @@ export function SettingsPage() {
             { id: 'workflow', label: 'Workflows', icon: CheckCircle2 },
             { id: 'data', label: 'Import & export', icon: Database },
             { id: 'audit', label: 'Audit log', icon: ShieldCheck },
-          ].map((t) => (
-            <button
-              key={t.id}
-              className={tab === t.id ? 'active' : ''}
-              onClick={() => setTab(t.id)}
-            >
-              <t.icon size={16} />
-              {t.label}
-            </button>
-          ))}
+          ]
+            .filter((t) => admin || t.id !== 'audit')
+            .map((t) => (
+              <button
+                key={t.id}
+                className={tab === t.id ? 'active' : ''}
+                onClick={() => setTab(t.id)}
+              >
+                <t.icon size={16} />
+                {t.label}
+              </button>
+            ))}
         </aside>
         <div className="settings-content">
           {tab === 'general' ? (

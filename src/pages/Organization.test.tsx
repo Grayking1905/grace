@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
 import axe from 'axe-core';
 import { GraceProvider, type AppContextValue } from '../context';
 import { OrganizationAdministration, OrganizationMyWork } from './Organization';
-import { CreateHub } from '../components/CreateHub';
+import { CreateHub, OrganizationWorkDialog } from '../components/CreateHub';
+import { AppNavigation } from '../components/AppNavigation';
+import { CopyButton } from '../components/CopyButton';
+import { TeamDashboard } from './TeamDashboard';
+import { FocusWorkList } from './Focus';
 import App, { Login } from '../App';
 import {
   defaultTeamPermissions,
@@ -15,8 +19,8 @@ import {
   type OrganizationTeam,
   type OrganizationWork,
 } from '../../shared/organization';
-import type { Bootstrap } from '../../shared/types';
-import { api, post } from '../lib/api';
+import type { Bootstrap, Project } from '../../shared/types';
+import { api, post, patch } from '../lib/api';
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
   api: vi.fn(),
@@ -95,7 +99,13 @@ const data: Bootstrap = {
   },
 };
 let host: HTMLDivElement, root: Root, client: QueryClient;
-async function render(ui: React.ReactNode, administrator = false, path = '/') {
+async function render(
+  ui: React.ReactNode,
+  administrator = false,
+  path = '/',
+  manager = false,
+  overrides: Partial<Bootstrap> = {},
+) {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -107,7 +117,17 @@ async function render(ui: React.ReactNode, administrator = false, path = '/') {
           user: { ...user, role: 'owner' },
           organization: { ...data.organization!, can_admin: true },
         }
-      : data,
+      : manager
+        ? {
+            ...data,
+            user: { ...user, team_role: 'manager' },
+            organization: {
+              ...data.organization!,
+              employee: { ...data.organization!.employee, team_role: 'manager' },
+              can_manage_team: true,
+            },
+          }
+        : data,
     run: vi.fn(async (task) => task()),
     toast: vi.fn(),
     refresh: vi.fn(),
@@ -117,6 +137,7 @@ async function render(ui: React.ReactNode, administrator = false, path = '/') {
     openWork: vi.fn(),
     openCreateMenu: vi.fn(),
   };
+  context.data = { ...context.data, ...overrides };
   vi.mocked(api).mockImplementation(
     async (path) => (path.startsWith('/organization/work') ? [work] : []) as never,
   );
@@ -159,7 +180,7 @@ it('keeps navigation effects safe under StrictMode when the browser scroll helpe
     errors.mockRestore();
   }
 });
-it('opens BRDs from the whole My Work card and filters work into distinct sections', async () => {
+it('opens BRDs from the whole My Work row and filters the unified work list', async () => {
   const context = await render(<OrganizationMyWork />);
   const card = host.querySelector<HTMLButtonElement>(
     '[aria-label="Open BRD: Onboarding requirements"]',
@@ -167,13 +188,140 @@ it('opens BRDs from the whole My Work card and filters work into distinct sectio
   expect(card).not.toBeNull();
   await act(async () => card!.click());
   expect(context.openWork).toHaveBeenCalledWith('brd', team.id, work);
+  await act(async () => {
+    const filter = host.querySelector<HTMLSelectElement>('[aria-label="Work type"]')!;
+    filter.value = 'daily';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(host.querySelector('[aria-label="Open BRD: Onboarding requirements"]')).toBeNull();
+});
+it('keeps advanced tools accessible through one disclosure and scopes manager navigation', async () => {
+  const help = vi.fn();
+  await render(<AppNavigation openHelp={help} />, false, '/', true);
+  expect(host.querySelectorAll('.simple-primary-nav a')).toHaveLength(6);
+  expect(host.querySelector('a[href="/templates"]')).toBeNull();
+  expect(host.querySelector('a[href="/administration"]')).toBeNull();
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>('[aria-controls="additional-tools"]')!.click(),
+  );
+  expect(host.querySelector('a[href="/organization"]')?.textContent).toContain('Manage my team');
+  expect(host.querySelector('a[href="/templates"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/portfolio"]')).not.toBeNull();
+  const helpButton = host.querySelector<HTMLButtonElement>('.nav-help')!;
+  expect(helpButton.getAttribute('aria-label')).toBe('Help & shortcuts');
+  await act(async () => helpButton.click());
+  expect(help).toHaveBeenCalledOnce();
+});
+it('provides manual copy when clipboard access is denied instead of silently failing', async () => {
+  const writeText = vi.fn().mockRejectedValue(new Error('Permission denied'));
+  const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    const context = await render(
+      <CopyButton text="https://grace.example.test/work/42" label="Copy link" />,
+    );
+    await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="Text to copy"]')?.value).toBe(
+      'https://grace.example.test/work/42',
+    );
+    expect(context.toast).not.toHaveBeenCalled();
+    await act(async () =>
+      [...host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent === 'Done')!
+        .click(),
+    );
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  } finally {
+    if (original) Object.defineProperty(navigator, 'clipboard', original);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+it('lets a manager save their dashboard without submitting administrator-only privileges', async () => {
+  await render(<OrganizationAdministration />, false, '/', true);
+  vi.mocked(patch).mockResolvedValue({ ...team, version: 2 });
+  await act(async () =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('Configure'))!
+      .click(),
+  );
+  const dialog = host.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog.textContent).not.toContain('Advanced role permissions');
+  await act(async () =>
+    dialog
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+  );
+  expect(patch).toHaveBeenCalledWith(
+    `/organization/teams/${team.id}/layout`,
+    expect.objectContaining({ name: team.name, sections: team.sections, version: 1 }),
+  );
+  expect(vi.mocked(patch).mock.calls[0][1]).not.toHaveProperty('permissions');
+});
+it('does not expand advanced tools merely because a team dashboard is open', async () => {
+  await render(<AppNavigation openHelp={vi.fn()} />, false, `/teams/${team.id}`);
+  expect(
+    host.querySelector('[aria-controls="additional-tools"]')?.getAttribute('aria-expanded'),
+  ).toBe('false');
+  expect(host.querySelector('a[href="/team"]')).toBeNull();
+  expect(host.querySelector(`a[href="/teams/${team.id}"]`)?.textContent).toContain('My team');
+});
+it('switches team sections and removes redundant type filters for a single work type', async () => {
+  const context = await render(
+    <Routes>
+      <Route path="/teams/:teamId" element={<TeamDashboard />} />
+    </Routes>,
+    false,
+    `/teams/${team.id}`,
+  );
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="false"]')!.click(),
+  );
+  const brdTab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (b) => b.textContent === 'BRDs',
+  )!;
+  await act(async () => brdTab.click());
+  expect(brdTab.getAttribute('aria-selected')).toBe('true');
+  expect(host.querySelector('[aria-label="Work type"]')).toBeNull();
   await act(async () =>
     host
-      .querySelector<HTMLButtonElement>('[role="tab"]')!
-      .nextElementSibling!.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+      .querySelector<HTMLButtonElement>('[aria-label="Open BRD: Onboarding requirements"]')!
+      .click(),
   );
-  expect(host.querySelector('[role="tabpanel"]')?.getAttribute('aria-label')).toBe('Daily tasks');
-  expect(host.querySelector('[aria-label="Open BRD: Onboarding requirements"]')).toBeNull();
+  expect(context.openWork).toHaveBeenCalledWith('brd', team.id, work);
+});
+it('keeps the unified work controls accessible and named', async () => {
+  await render(<OrganizationMyWork />);
+  const result = await axe.run(host, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] },
+    rules: { 'color-contrast': { enabled: false } },
+  });
+  expect(result.violations.map((v) => v.id)).toEqual([]);
+});
+it('keeps project-linked tasks readable without offering edits for read-only project access', async () => {
+  const task = {
+    ...work,
+    kind: 'daily' as const,
+    project_id: 'read-only',
+    state: 'planned' as const,
+  };
+  await render(
+    <>
+      <FocusWorkList issues={[]} work={[task]} />
+      <OrganizationWorkDialog kind="daily" item={task} onClose={vi.fn()} />
+    </>,
+    false,
+    '/',
+    true,
+    { projects: [{ id: 'read-only', name: 'Restricted project', can_write: false } as Project] },
+  );
+  expect(host.querySelector('[aria-label="Complete Onboarding requirements"]')).toBeNull();
+  expect(
+    host.querySelector('[aria-label="Open Daily task: Onboarding requirements"]'),
+  ).not.toBeNull();
+  expect(host.querySelector('input[name="title"]')?.matches(':disabled')).toBe(true);
+  expect([...host.querySelectorAll('button')].some((b) => b.textContent === 'Save changes')).toBe(
+    false,
+  );
 });
 it('offers the correct create actions and disables actions disallowed by team privileges', async () => {
   const close = vi.fn();

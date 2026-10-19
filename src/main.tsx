@@ -7,6 +7,8 @@ import { AppErrorBoundary } from './components/AppErrorBoundary';
 import '@fontsource-variable/dm-sans';
 import '@fontsource-variable/manrope';
 import './styles.css';
+import './simplified.css';
+import './sidebar.css';
 const client = new QueryClient({
   defaultOptions: {
     queries: { retry: false, refetchOnWindowFocus: true, staleTime: 15000 },

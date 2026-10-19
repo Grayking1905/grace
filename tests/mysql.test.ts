@@ -36,7 +36,7 @@ describe.skipIf(!enabled)('Real MySQL 8 integration', () => {
     const versions = await instance.db.all<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version',
     );
-    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
   it('uses the actual MySQL full-text index and bounded keyset pagination', async () => {
     const marker = `searchable-${randomBytes(3).toString('hex')}`;
@@ -149,6 +149,97 @@ describe.skipIf(!enabled)('Real MySQL 8 integration', () => {
     expect(
       (await employee.get('/api/v1/organization/work')).body.some(
         (w: { id: string }) => w.id === created.body.id,
+      ),
+    ).toBe(true);
+  });
+  it('persists team manager access and limits layout changes to the assigned team', async () => {
+    const organization = (await owner.get('/api/v1/organization')).body;
+    const team = organization.teams.find((t: { slug: string }) => t.slug === 'frontend');
+    const email = `manager-${randomBytes(3).toString('hex')}@example.test`;
+    const invite = await owner
+      .post('/api/v1/invites')
+      .set(csrf)
+      .send({
+        email,
+        employee_id: `MANAGER-${randomBytes(3).toString('hex')}`,
+        team_id: team.id,
+        team_role: 'manager',
+      });
+    expect(invite.status).toBe(201);
+    const manager = request.agent(instance.app);
+    expect(
+      (
+        await manager
+          .post('/api/v1/auth/register')
+          .set(csrf)
+          .send({
+            email,
+            name: 'MySQL Team Manager',
+            password: 'StrongPassword2026!',
+            invite_token: new URL(invite.body.url).searchParams.get('token'),
+          })
+      ).status,
+    ).toBe(201);
+    const context = (await manager.get('/api/v1/organization')).body;
+    expect(context).toMatchObject({ can_admin: false, can_manage_team: true });
+    expect(context.teams.map((t: { id: string }) => t.id)).toEqual([team.id]);
+    const layout = {
+      name: team.name,
+      description: 'MySQL manager layout',
+      color: team.color,
+      sections: team.sections,
+      version: team.version,
+    };
+    const updated = await manager
+      .patch(`/api/v1/organization/teams/${team.id}/layout`)
+      .set(csrf)
+      .send(layout);
+    expect(updated.status).toBe(200);
+    expect(updated.body.permissions).toEqual(team.permissions);
+    expect(
+      (await manager.patch(`/api/v1/organization/teams/${team.id}/layout`).set(csrf).send(layout))
+        .status,
+    ).toBe(409);
+    expect(
+      (
+        await manager
+          .patch(`/api/v1/organization/teams/${team.id}`)
+          .set(csrf)
+          .send({ ...layout, permissions: team.permissions })
+      ).status,
+    ).toBe(403);
+  });
+  it('queries Home analytics and persists versioned project team assignments and activity', async () => {
+    const home = await owner.get('/api/v1/organization/overview?days=7');
+    expect(home.status).toBe(200);
+    expect(home.body.trend).toHaveLength(7);
+    const frontend = home.body.teams.find((t: { name: string }) => t.name === 'Frontend');
+    const project = home.body.projects.find((p: { id: string }) => p.id === 'project-platform');
+    expect(
+      (
+        await owner
+          .put('/api/v1/projects/project-platform/teams')
+          .set(csrf)
+          .send({ team_ids: [frontend.id], version: project.assignment_version })
+      ).status,
+    ).toBe(200);
+    const updated = (await owner.get('/api/v1/organization/overview')).body;
+    expect(
+      updated.projects.find((p: { id: string }) => p.id === 'project-platform').team_ids,
+    ).toEqual([frontend.id]);
+    const feed = await owner.get('/api/v1/organization/activity?limit=2');
+    expect(feed.status).toBe(200);
+    expect(feed.body.items).toHaveLength(2);
+    expect(
+      feed.body.items.some((e: { action: string }) => e.action === 'project.teams.assigned'),
+    ).toBe(true);
+    const next = await owner
+      .get('/api/v1/organization/activity')
+      .query({ limit: 2, cursor: feed.body.next_cursor });
+    expect(next.status).toBe(200);
+    expect(
+      next.body.items.every(
+        (e: { id: string }) => !feed.body.items.some((f: { id: string }) => e.id === f.id),
       ),
     ).toBe(true);
   });

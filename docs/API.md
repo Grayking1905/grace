@@ -59,19 +59,24 @@ This is a browser-session API for the development release. Scoped API tokens, co
 
 ## Real time
 
-Socket.IO uses the same authenticated access cookie. Each socket enters its current workspace room. A generic `workspace.updated` event causes clients to refetch through the API; sensitive record payloads are not broadcast. Sessions are rechecked every 30 seconds. Redis fan-out and event replay are not yet implemented.
+Socket.IO uses the same authenticated access cookie. Each socket enters its current workspace room. A generic `workspace.updated` event causes clients to refetch through the API; sensitive record payloads are not broadcast. `presence.updated` invalidates Home presence when a client connects or disconnects, also without member/event payloads. Sessions and active memberships are rechecked every 30 seconds. Home refetches every 15 seconds as a fallback; reconnects validate the session and refresh current data. Online counts deduplicate connected users and are local to one API instance. Redis fan-out, distributed presence and event replay are not yet implemented.
 
 ## Organization teams and work
 
-- `GET /organization`: the current employee assignment and accessible team dashboards. Owners/admins see every team; employees see their assigned team.
-- `POST /organization/teams`: admin creates name, description, color, sections, permissions. Sections: issues/bugs/features/brds/daily/versions. Permissions map lead/member/viewer roles to work/brds/daily/versions editing capabilities; viewers remain read-only.
+- `GET /organization/overview?days=14&team_id=&project_id=`: SQL-backed current issue/status/point counts, team and project progress, assigned/linked teams, available project filters, connected members, daily issue activity and attention items. Days are 7/14/30. Admins may select a team; all other roles are restricted to their own team. Project visibility is enforced before aggregation. Team-work totals are separate from issue totals.
+- `GET /organization/activity?days=14&kind=all&actor_id=&team_id=&project_id=&limit=20&cursor=`: saved Home activity, current actor names/colors and safe entity metadata. Kinds: all/signins/work. Limit 1–50; returns items and next_cursor. Cursor order is created_at/id descending. Team, project and current issue access are enforced before limiting results; invalid cursors return 400. Comments, credentials and raw audit detail are not included.
+- `PUT /projects/:id/teams`: organization admin, team_ids (up to 100 unique organization teams), version. Use version 0 for a project with no assignment revision. Updates are transactional, audited and versioned; stale writes return 409. An empty list clears explicit team ownership. Team assignment does not grant private-project access or change issue assignees.
+
+- `GET /organization`: the current employee assignment and accessible team dashboards, plus can_admin and can_manage_team flags. Owners/admins see every team; employees see their assigned team.
+- `POST /organization/teams`: admin creates name, description, color, sections, permissions. Sections: issues/bugs/features/brds/daily/versions. Permissions map manager/lead/member/viewer roles to work/brds/daily/versions editing capabilities; viewers remain read-only.
 - `PATCH /organization/teams/:id`: admin supplies the full configuration and required version. Stale edits return 409.
-- `GET /organization/employees`: admin employee directory with employee IDs, team assignments, organization roles, active state and assignment versions.
-- `PUT /organization/employees/:id`: admin supplies employee_id, team_id, team_role and version. IDs are unique within the organization, including reservations from pending invitations. Changing teams requires reassignment/completion of open organization work.
+- `PATCH /organization/teams/:id/layout`: own-team manager or admin supplies name, description, color, sections and version. A strict schema rejects permissions; capability configuration remains admin-only. Stale edits return 409.
+- `GET /organization/employees`: admins see the organization directory; managers see their own team only. Includes employee IDs, team assignments, organization roles, active state and assignment versions.
+- `PUT /organization/employees/:id`: supplies employee_id, team_id, team_role (manager/lead/member/viewer) and version. Admins can change assignments; managers can change lead/member/viewer roles of ordinary employees within their team only. Managers cannot edit self, manager or organization-admin assignments, employee IDs, or team IDs. IDs are unique within the organization, including reservations from pending invitations. Changing teams requires reassignment/completion of open organization work.
 - `GET /organization/work`: optional team_id, kind=brd/daily/version and mine=true. Returns the most recent 500 accessible items. Private-project access and team assignment are enforced before limiting results.
 - `GET /organization/work/:id`: the accessible item, visible issue_ids and has_hidden_links. Hidden links are retained on edits.
 - `POST /organization/work`: team_id, kind, title, owner_id; optional project_id, content (sanitized rich HTML), state, due_date, version_tag, issue_ids. States: draft/planned/active/review/done. Versions require version_tag. Project and linked-issue access are checked.
-- `PATCH /organization/work/:id`: full work fields and required version; the team and kind cannot change. Author/owner/lead/admin and team capability checks apply.
+- `PATCH /organization/work/:id`: full work fields and required version; the team and kind cannot change. Author/owner/manager/lead/admin and team capability checks apply.
 - `DELETE /organization/work/:id?version=N`: same edit permissions and a matching version; removes the item and its traceability links, records an audit event, and broadcasts invalidation.
 
 ## Expansion endpoints

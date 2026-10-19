@@ -103,7 +103,7 @@ export function CreateHub({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Create" onClose={onClose} wide>
       <div className="modal-body create-hub">
-        <p>Give the next piece of work a place to start.</p>
+        <p>Choose what you want to create.</p>
         <div className="create-choice-grid">
           {choices.map((choice) => (
             <button
@@ -180,9 +180,11 @@ export function OrganizationWorkDialog({
   const writable =
     data.user.role !== 'viewer' &&
     canTeamCreate(data.organization, capability, selectedTeam) &&
+    (!item?.project_id ||
+      data.projects.find((p) => p.id === item.project_id)?.can_write !== false) &&
     (!item ||
       data.organization?.can_admin ||
-      data.user.team_role === 'lead' ||
+      ['manager', 'lead'].includes(data.user.team_role || '') ||
       item.owner_id === data.user.id ||
       item.created_by === data.user.id);
   const current = useQuery({
@@ -290,11 +292,13 @@ export function OrganizationWorkDialog({
                   disabled={!!item && item.issue_ids.length > 0}
                 >
                   <option value="">Organization work · no project</option>
-                  {data.projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
+                  {data.projects
+                    .filter((p) => p.can_write !== false || p.id === item?.project_id)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
                 </select>
               </label>
             </div>
@@ -355,79 +359,91 @@ export function OrganizationWorkDialog({
               </label>
             )}
           </fieldset>
-          <div className="work-description-label">
-            {kind === 'brd'
-              ? 'Business requirements'
-              : kind === 'version'
-                ? 'Release notes'
-                : 'Details'}
-          </div>
-          <Editor content={content} onChange={setContent} editable={writable && !busy} />
-          <section className="work-linked-issues">
-            <h3>
-              Linked work <Badge>{linked.length}</Badge>
-            </h3>
-            {item?.has_hidden_links && (
-              <p className="organization-footnote">
-                Some linked work is restricted by project access. Those links are preserved when you
-                save.
-              </p>
-            )}
-            {linked.map((id) => {
-              const issue = data.issues.find((i) => i.id === id);
-              return (
-                <div key={id}>
-                  <button type="button" onClick={() => openIssue(id)}>
-                    {issue?.key || 'Issue'} · {issue?.summary || 'Open linked work'}
-                  </button>
-                  {writable && (
-                    <button
-                      type="button"
-                      aria-label={`Unlink ${issue?.key || 'issue'}`}
-                      onClick={() => setLinked((v) => v.filter((i) => i !== id))}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-            {writable && (
-              <>
-                <input
-                  aria-label="Find issues to link"
-                  placeholder="Find issues to link…"
-                  value={linkSearch}
-                  onChange={(e) => setLinkSearch(e.target.value)}
-                />
-                {linkSearch && (
-                  <div className="work-link-results">
-                    {data.issues
-                      .filter(
-                        (i) =>
-                          (!projectId || i.project_id === projectId) &&
-                          !linked.includes(i.id) &&
-                          `${i.key} ${i.summary}`.toLowerCase().includes(linkSearch.toLowerCase()),
-                      )
-                      .slice(0, 8)
-                      .map((i) => (
+          <details
+            className="form-disclosure"
+            open={kind !== 'daily' || !!item?.content.replace(/<[^>]*>/g, '').trim()}
+          >
+            <summary>
+              {kind === 'daily' ? 'Notes and linked work' : 'Linked work and details'}
+            </summary>
+            <div className="form-disclosure-content">
+              <div className="work-description-label">
+                {kind === 'brd'
+                  ? 'Business requirements'
+                  : kind === 'version'
+                    ? 'Release notes'
+                    : 'Details'}
+              </div>
+              <Editor content={content} onChange={setContent} editable={writable && !busy} />
+              <section className="work-linked-issues">
+                <h3>
+                  Linked work <Badge>{linked.length}</Badge>
+                </h3>
+                {item?.has_hidden_links && (
+                  <p className="organization-footnote">
+                    Some linked work is restricted by project access. Those links are preserved when
+                    you save.
+                  </p>
+                )}
+                {linked.map((id) => {
+                  const issue = data.issues.find((i) => i.id === id);
+                  return (
+                    <div key={id}>
+                      <button type="button" onClick={() => openIssue(id)}>
+                        {issue?.key || 'Issue'} · {issue?.summary || 'Open linked work'}
+                      </button>
+                      {writable && (
                         <button
                           type="button"
-                          key={i.id}
-                          onClick={() => {
-                            setLinked((v) => [...v, i.id]);
-                            setLinkSearch('');
-                          }}
+                          aria-label={`Unlink ${issue?.key || 'issue'}`}
+                          onClick={() => setLinked((v) => v.filter((i) => i !== id))}
                         >
-                          {i.key} · {i.summary}
-                          <Plus size={14} />
+                          Remove
                         </button>
-                      ))}
-                  </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {writable && (
+                  <>
+                    <input
+                      aria-label="Find issues to link"
+                      placeholder="Find issues to link…"
+                      value={linkSearch}
+                      onChange={(e) => setLinkSearch(e.target.value)}
+                    />
+                    {linkSearch && (
+                      <div className="work-link-results">
+                        {data.issues
+                          .filter(
+                            (i) =>
+                              (!projectId || i.project_id === projectId) &&
+                              !linked.includes(i.id) &&
+                              `${i.key} ${i.summary}`
+                                .toLowerCase()
+                                .includes(linkSearch.toLowerCase()),
+                          )
+                          .slice(0, 8)
+                          .map((i) => (
+                            <button
+                              type="button"
+                              key={i.id}
+                              onClick={() => {
+                                setLinked((v) => [...v, i.id]);
+                                setLinkSearch('');
+                              }}
+                            >
+                              {i.key} · {i.summary}
+                              <Plus size={14} />
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </section>
+              </section>
+            </div>
+          </details>
         </div>
         <div className="modal-footer">
           {item && writable && (

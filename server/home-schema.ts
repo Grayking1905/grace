@@ -1,0 +1,5 @@
+export const homeTables: Record<string, string> = {
+  project_team_settings: `project_id VARCHAR(64) PRIMARY KEY, workspace_id VARCHAR(64) NOT NULL, version INTEGER NOT NULL DEFAULT 1, FOREIGN KEY(project_id) REFERENCES projects(id), FOREIGN KEY(workspace_id) REFERENCES workspaces(id)`,
+  project_team_assignments: `workspace_id VARCHAR(64) NOT NULL, project_id VARCHAR(64) NOT NULL, team_id VARCHAR(64) NOT NULL, PRIMARY KEY(project_id,team_id), FOREIGN KEY(project_id) REFERENCES projects(id), FOREIGN KEY(team_id) REFERENCES organization_teams(id), FOREIGN KEY(workspace_id) REFERENCES workspaces(id)`,
+  home_events: `id VARCHAR(64) PRIMARY KEY, workspace_id VARCHAR(64) NOT NULL, actor_id VARCHAR(64) NOT NULL, action VARCHAR(100) NOT NULL, entity_type VARCHAR(32) NOT NULL, entity_id VARCHAR(64) NOT NULL, title VARCHAR(255) NOT NULL, project_id VARCHAR(64), team_id VARCHAR(64), created_at VARCHAR(32) NOT NULL, FOREIGN KEY(workspace_id) REFERENCES workspaces(id), FOREIGN KEY(actor_id) REFERENCES users(id)`,
+};
