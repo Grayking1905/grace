@@ -11,7 +11,7 @@ export function parseTeam(row: Record<string, unknown>): OrganizationTeam {
   return {
     ...row,
     sections: JSON.parse(String(row.sections)),
-    permissions: JSON.parse(String(row.permissions)),
+    permissions: { ...defaultTeamPermissions, ...JSON.parse(String(row.permissions)) },
   } as OrganizationTeam;
 }
 export async function ensureOrganization(db: Database, workspaceId: string) {
@@ -86,6 +86,22 @@ export async function applyOrganizationMigration(db: Database) {
   for (const workspace of workspaces) await ensureOrganization(db, workspace.id);
   if (!(await db.one('SELECT version FROM schema_migrations WHERE version=7')))
     await db.insert('schema_migrations', { version: 7, applied_at: now() });
+  if (!(await db.one('SELECT version FROM schema_migrations WHERE version=8'))) {
+    await db.transaction(async () => {
+      const teams = await db.all<{ id: string; permissions: string }>(
+        'SELECT id,permissions FROM organization_teams',
+      );
+      for (const team of teams) {
+        const permissions = JSON.parse(team.permissions);
+        if (!Object.hasOwn(permissions, 'manager'))
+          await db.run('UPDATE organization_teams SET permissions=?,version=version+1 WHERE id=?', [
+            JSON.stringify({ ...permissions, manager: defaultTeamPermissions.manager }),
+            team.id,
+          ]);
+      }
+      await db.insert('schema_migrations', { version: 8, applied_at: now() });
+    });
+  }
 }
 export async function organizationContext(
   db: Database,
@@ -104,5 +120,10 @@ export async function organizationContext(
       ' ORDER BY name',
     canAdmin ? [workspaceId] : [workspaceId, employee?.team_id || ''],
   );
-  return { teams: teams.map(parseTeam), employee: employee!, can_admin: canAdmin };
+  return {
+    teams: teams.map(parseTeam),
+    employee: employee!,
+    can_admin: canAdmin,
+    can_manage_team: canAdmin || (role !== 'viewer' && employee?.team_role === 'manager'),
+  };
 }

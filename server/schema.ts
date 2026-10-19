@@ -2,6 +2,7 @@
 // Schema changes must be versioned here; never mutate existing migrations.
 import { expansionTables } from './expansion-schema.js';
 import { organizationTables } from './organization-schema.js';
+import { homeTables } from './home-schema.js';
 export const tables: Record<string, string> = {
   schema_migrations: `version INTEGER PRIMARY KEY, applied_at VARCHAR(32) NOT NULL`,
   workspaces: `id VARCHAR(64) PRIMARY KEY, name VARCHAR(120) NOT NULL, slug VARCHAR(120) NOT NULL UNIQUE, created_at VARCHAR(32) NOT NULL`,
@@ -34,6 +35,7 @@ export const tables: Record<string, string> = {
   sprint_issue_snapshots: `sprint_id VARCHAR(64) NOT NULL, phase VARCHAR(10) NOT NULL, workspace_id VARCHAR(64) NOT NULL, issue_id VARCHAR(64) NOT NULL, issue_key VARCHAR(32) NOT NULL, summary VARCHAR(255) NOT NULL, status_id VARCHAR(64) NOT NULL, story_points INTEGER NOT NULL, category VARCHAR(20) NOT NULL, PRIMARY KEY(sprint_id,phase,issue_id), FOREIGN KEY(sprint_id) REFERENCES sprints(id), FOREIGN KEY(issue_id) REFERENCES issues(id)`,
   ...expansionTables,
   ...organizationTables,
+  ...homeTables,
 };
 export const indexes = [
   ['issues_workspace_project', 'issues', 'workspace_id,project_id,deleted_at'],
@@ -51,4 +53,8 @@ export const indexes = [
   ['issue_templates_workspace', 'issue_templates', 'workspace_id,project_id'],
   ['employee_team', 'employee_profiles', 'workspace_id,team_id'],
   ['organization_work_team', 'organization_work', 'workspace_id,team_id,kind,state'],
+  ['home_events_cursor', 'home_events', 'workspace_id,created_at,id'],
+  ['home_events_team', 'home_events', 'workspace_id,team_id,created_at'],
+  ['home_events_actor', 'home_events', 'workspace_id,actor_id,action,created_at'],
+  ['project_teams_team', 'project_team_assignments', 'workspace_id,team_id,project_id'],
 ];

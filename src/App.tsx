@@ -1,6 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  NavLink,
   Routes,
   Route,
   Navigate,
@@ -10,22 +9,17 @@ import {
   Link,
 } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { io } from 'socket.io-client';
+import { useWorkspaceRealtime } from './lib/useWorkspaceRealtime';
 import {
   Search,
   Plus,
-  CopyPlus,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown,
-  House,
-  CircleCheck,
   Inbox,
+  CircleCheck,
   FolderKanban,
   FileText,
-  ChartNoAxesCombined,
   Users,
-  Settings,
   CircleHelp,
   ArrowUpRight,
   Command,
@@ -34,9 +28,6 @@ import {
   Menu,
   LogOut,
   Sparkles,
-  PanelLeftClose,
-  LayoutGrid,
-  SlidersHorizontal,
   ShieldCheck,
 } from 'lucide-react';
 import type { Bootstrap, Issue, Project } from '../shared/types';
@@ -49,19 +40,22 @@ import { PublicAccountPage } from './pages/Accounts';
 import { projectTemplates } from '../shared/templates';
 import type { OrganizationWork, OrganizationWorkKind } from '../shared/organization';
 import { CreateHub, OrganizationWorkDialog } from './components/CreateHub';
+import { AppNavigation } from './components/AppNavigation';
+import { teamRoleLabels } from '../shared/organization';
 import './organization.css';
 const OrganizationHome = lazy(() =>
-  import('./pages/Organization').then((m) => ({ default: m.OrganizationHome })),
+  import('./pages/Home').then((m) => ({ default: m.OrganizationHome })),
 );
 const TeamDashboard = lazy(() =>
   import('./pages/Organization').then((m) => ({ default: m.TeamDashboard })),
 );
+const TeamsDirectory = lazy(() =>
+  import('./pages/Focus').then((m) => ({ default: m.TeamsDirectory })),
+);
 const OrganizationAdministration = lazy(() =>
   import('./pages/Organization').then((m) => ({ default: m.OrganizationAdministration })),
 );
-const MyWork = lazy(() =>
-  import('./pages/Organization').then((m) => ({ default: m.OrganizationMyWork })),
-);
+const MyWork = lazy(() => import('./pages/Focus').then((m) => ({ default: m.OrganizationMyWork })));
 const TemplatesPage = lazy(() =>
   import('./pages/Templates').then((m) => ({ default: m.TemplatesPage })),
 );
@@ -168,20 +162,7 @@ export default function App() {
     });
   }, [setSearchParams]);
   const data = bootstrap.data;
-  useEffect(() => {
-    if (!data?.user.id) return;
-    const socket = io({ withCredentials: true });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    socket.on('workspace.updated', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => queryClient.invalidateQueries(), 100);
-    });
-    socket.on('connect_error', () => {});
-    return () => {
-      clearTimeout(timer);
-      socket.disconnect();
-    };
-  }, [data?.user.id, queryClient]);
+  const connection = useWorkspaceRealtime(data?.user.id, data?.workspace.id);
   useEffect(() => {
     let prefix = '';
     const listener = (e: KeyboardEvent) => {
@@ -241,6 +222,7 @@ export default function App() {
   }
   const context = {
     data,
+    connection,
     refresh,
     run,
     toast,
@@ -278,6 +260,7 @@ export default function App() {
             <Route path="/" element={data.organization ? <OrganizationHome /> : <Dashboard />} />
             <Route path="/overview" element={<Dashboard />} />
             <Route path="/teams/:teamId" element={<TeamDashboard />} />
+            <Route path="/teams" element={<TeamsDirectory />} />
             <Route path="/organization" element={<OrganizationAdministration />} />
             <Route path="/invite" element={<InvitationAccept />} />
             <Route path="/my-work" element={<MyWork />} />
@@ -379,7 +362,7 @@ function Shell({
   openCommand: () => void;
   openHelp: () => void;
 }) {
-  const { data, run, openCreateMenu, openProjectCreate } = useGrace();
+  const { data, run, openCreateMenu } = useGrace();
   const location = useLocation();
   const [mobile, setMobile] = useState(false);
   const [smallScreen, setSmallScreen] = useState(
@@ -387,7 +370,10 @@ function Shell({
   );
   useEffect(() => {
     const media = window.matchMedia('(max-width: 760px)');
-    const change = () => setSmallScreen(media.matches);
+    const change = () => {
+      setSmallScreen(media.matches);
+      if (!media.matches) setMobile(false);
+    };
     media.addEventListener('change', change);
     return () => media.removeEventListener('change', change);
   }, []);
@@ -396,32 +382,28 @@ function Shell({
   const title =
     activeProject?.name ||
     {
-      '/': 'Overview',
+      '/': 'Home',
       '/my-work': 'My work',
       '/inbox': 'Inbox',
       '/projects': 'Projects',
       '/reports': 'Reports',
       '/team': 'Team',
-      '/manager': 'Manager suite',
+      '/manager': 'Team planning',
       '/settings': 'Settings',
       '/administration': 'Administration',
       '/security': 'Account security',
       '/templates': 'Issue templates',
       '/portfolio': 'Portfolio',
       '/organization': 'Organization',
+      '/teams': 'Teams',
       '/overview': 'Workspace overview',
     }[location.pathname] ||
     (location.pathname.startsWith('/teams')
       ? 'Team dashboard'
       : location.pathname.startsWith('/pages')
-        ? 'Pages'
+        ? 'Documents'
         : 'Views');
   const unread = data.notifications.filter((n) => !n.read_at).length;
-  const nav = [
-    { to: '/', label: data.organization?.can_admin ? 'Organization' : 'My dashboard', icon: House },
-    { to: '/my-work', label: 'My work', icon: CircleCheck },
-    { to: '/inbox', label: 'Inbox', icon: Inbox },
-  ];
   return (
     <div className="app-shell">
       {mobile && <div className="sidebar-scrim" onClick={() => setMobile(false)} />}
@@ -437,131 +419,37 @@ function Shell({
           </span>
           <span className="brand-workspace">PLATFORM</span>
         </Link>
+        <button
+          className="mobile-sidebar-close icon-btn"
+          aria-label="Close navigation"
+          onClick={() => setMobile(false)}
+        >
+          <X size={19} />
+        </button>
         <WorkspaceSwitcher />
         <button className="sidebar-search" onClick={openCommand}>
           <Search size={15} />
           <span>Quick search</span>
           <kbd>⌘ K</kbd>
         </button>
+        <p className="sidebar-nav-label">Workspace</p>
         <nav aria-label="Main navigation">
-          <div className="nav-group">
-            {nav.map((n) => (
-              <NavLink
-                key={n.to}
-                to={n.to}
-                end
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-              >
-                <n.icon size={17} />
-                <span>{n.label}</span>
-                {n.to === '/inbox' && unread > 0 && <span className="nav-count">{unread}</span>}
-              </NavLink>
-            ))}
-          </div>
-          {data.organization && (
-            <>
-              <div className="nav-section-label">
-                <span>TEAM DASHBOARDS</span>
-                {data.organization.can_admin && (
-                  <Link to="/organization" aria-label="Manage team dashboards">
-                    <Settings size={14} />
-                  </Link>
-                )}
-              </div>
-              {data.organization.teams.map((team) => (
-                <NavLink
-                  to={`/teams/${team.id}`}
-                  className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                  key={team.id}
-                >
-                  <span className="project-dot" style={{ background: team.color }} />
-                  <span>{team.name}</span>
-                  <ChevronRight size={13} />
-                </NavLink>
-              ))}
-            </>
-          )}
-          <div className="nav-section-label">
-            <span>PROJECTS</span>
-            <IconButton
-              label="New project"
-              onClick={openProjectCreate}
-              disabled={data.user.role === 'viewer'}
-            >
-              <Plus size={15} />
-            </IconButton>
-          </div>
-          <NavLink to="/projects" end className="nav-item">
-            <FolderKanban size={17} />
-            <span>All projects</span>
-          </NavLink>
-          {data.projects
-            .filter((p) => p.favorite)
-            .slice(0, 4)
-            .map((p) => (
-              <NavLink
-                to={`/projects/${p.id}/board`}
-                className={({ isActive }) =>
-                  `nav-item project-nav ${isActive || activeProject?.id === p.id ? 'project-active' : ''}`
-                }
-                key={p.id}
-              >
-                <span className="project-dot" style={{ background: p.color }} />
-                <span>{p.name}</span>
-                <ChevronRight size={13} />
-              </NavLink>
-            ))}
-          <div className="nav-section-label">WORKSPACE</div>
-          {[
-            { to: '/pages', label: 'Pages', icon: FileText },
-            { to: '/portfolio', label: 'Portfolio', icon: LayoutGrid },
-            { to: '/templates', label: 'Issue templates', icon: CopyPlus },
-            { to: '/views', label: 'Views', icon: SlidersHorizontal },
-            { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined },
-            { to: '/team', label: 'Team', icon: Users },
-            { to: '/manager', label: 'Manager suite', icon: LayoutGrid },
-          ].map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <n.icon size={17} />
-              <span>{n.label}</span>
-              {n.to === '/manager' && <span className="small-new">NEW</span>}
-            </NavLink>
-          ))}
-          <div className="nav-section-label">ACCOUNT & ADMINISTRATION</div>
-          <NavLink to="/settings" className="nav-item">
-            <Settings size={17} />
-            <span>Settings</span>
-          </NavLink>
-          <NavLink to="/administration" className="nav-item">
-            <ShieldCheck size={17} />
-            <span>Administration</span>
-          </NavLink>
-          {data.organization?.can_admin && (
-            <NavLink to="/organization" className="nav-item">
-              <Users size={17} />
-              <span>Teams & privileges</span>
-            </NavLink>
-          )}
-          <NavLink to="/security" className="nav-item">
-            <ShieldCheck size={17} />
-            <span>Security & alerts</span>
-          </NavLink>
-          <button className="nav-item" onClick={openHelp}>
-            <CircleHelp size={17} />
-            <span>Help & shortcuts</span>
-            <kbd>?</kbd>
-          </button>
+          <AppNavigation openHelp={openHelp} />
         </nav>
         <div className="sidebar-bottom">
           <div className="profile">
             <Avatar user={data.user} size={33} />
             <span>
-              <strong>{data.user.name}</strong>
-              <small title={data.user.employee_id}>{data.user.employee_id || data.user.role}</small>
+              <strong title={data.user.name}>{data.user.name}</strong>
+              <small title={data.user.employee_id}>
+                {data.user.role === 'owner'
+                  ? 'Owner'
+                  : data.user.role === 'admin'
+                    ? 'Admin'
+                    : data.user.team_role
+                      ? teamRoleLabels[data.user.team_role]
+                      : data.user.role}
+              </small>
             </span>
             <IconButton
               label="Sign out"
@@ -587,8 +475,7 @@ function Shell({
             >
               <Menu size={20} />
             </button>
-            <PanelLeftClose className="desktop-sidebar-icon" size={17} />
-            <span className="breadcrumb-workspace">Organization</span>
+            <span className="breadcrumb-workspace">{data.workspace.name}</span>
             <ChevronRight size={13} />
             <strong>{title}</strong>
             {activeProject && <Badge>{activeProject.key}</Badge>}
@@ -949,15 +836,28 @@ function CreateIssue({
   defaults: Record<string, unknown>;
   onClose: () => void;
 }) {
-  const { data, run, openIssue } = useGrace();
+  const { data, run, openIssue, openProjectCreate } = useGrace();
+  const requiredType =
+    defaults.creation_kind === 'New feature'
+      ? 'story'
+      : defaults.creation_kind === 'Bug'
+        ? 'bug'
+        : defaults.parent_id
+          ? 'subtask'
+          : undefined;
+  const writableProjects = data.projects.filter(
+    (p) =>
+      p.can_write !== false && (!requiredType || p.issue_types?.includes(requiredType) !== false),
+  );
   const [projectId, setProjectId] = useState(
     String(
-      defaults.project_id ||
-        data.projects.find(
+      writableProjects.find((p) => p.id === defaults.project_id)?.id ||
+        writableProjects.find(
           (p) =>
             p.can_write !== false &&
             (!defaults.type || p.issue_types?.includes(defaults.type as Issue['type']) !== false),
         )?.id ||
+        writableProjects[0]?.id ||
         '',
     ),
   );
@@ -1003,9 +903,21 @@ function CreateIssue({
       onClose={onClose}
       wide
     >
-      {!data.projects.length ? (
+      {!writableProjects.length ? (
         <div className="modal-body">
-          <p>Create your first project before adding an issue.</p>
+          <p>
+            {requiredType
+              ? 'No editable project supports this work type. Choose a suitable project configuration.'
+              : 'Create a project before adding work.'}
+          </p>
+          <Button
+            onClick={() => {
+              onClose();
+              openProjectCreate();
+            }}
+          >
+            Create a project
+          </Button>
         </div>
       ) : (
         <form onSubmit={submit}>
@@ -1014,13 +926,11 @@ function CreateIssue({
               <label>
                 Project
                 <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                  {data.projects
-                    .filter((p) => p.can_write !== false)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · {p.key}
-                      </option>
-                    ))}
+                  {writableProjects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.key}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
@@ -1028,7 +938,11 @@ function CreateIssue({
                 <select
                   name="type"
                   key={`${projectId}-type`}
-                  defaultValue={String(defaults.type || selectedProject?.default_type || 'task')}
+                  defaultValue={String(
+                    selectedProject?.issue_types?.includes(defaults.type as Issue['type'])
+                      ? defaults.type
+                      : selectedProject?.default_type || 'task',
+                  )}
                 >
                   {(
                     selectedProject?.issue_types || ['task', 'story', 'bug', 'epic', 'subtask']
@@ -1051,10 +965,12 @@ function CreateIssue({
                 autoFocus
               />
             </label>
-            <label>
-              Description
-              <Editor content={description} onChange={setDescription} compact />
-            </label>
+            <details className="form-disclosure" open={!!defaults.description}>
+              <summary>Description</summary>
+              <div className="form-disclosure-content">
+                <Editor content={description} onChange={setDescription} compact />
+              </div>
+            </details>
             <div className="form-row three">
               <label>
                 Status
@@ -1094,72 +1010,79 @@ function CreateIssue({
                 </select>
               </label>
             </div>
-            <div className="form-row three">
-              <label>
-                Sprint
-                <select
-                  name="sprint_id"
-                  key={`${projectId}-sprint`}
-                  defaultValue={String(defaults.sprint_id || '')}
-                >
-                  <option value="">Backlog</option>
-                  {sprints.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Story points
-                <input
-                  type="number"
-                  min={0}
-                  max={1000}
-                  name="story_points"
-                  placeholder="0"
-                  defaultValue={Number(defaults.story_points) || 0}
-                />
-              </label>
-              <label>
-                Due date
-                <input type="date" name="due_date" />
-              </label>
-            </div>
-            <div className="form-row">
-              <label>
-                Labels
-                <input
-                  name="labels"
-                  placeholder="Design, Frontend"
-                  defaultValue={
-                    Array.isArray(defaults.labels)
-                      ? defaults.labels.join(', ')
-                      : String(defaults.labels || '')
-                  }
-                />
-              </label>
-              <label>
-                Parent issue
-                <select name="parent_id" defaultValue={String(defaults.parent_id || '')}>
-                  <option value="">No parent</option>
-                  {data.issues
-                    .filter(
-                      (i) =>
-                        i.project_id === projectId &&
-                        ['epic', 'story', 'task', 'bug'].includes(i.type),
-                    )
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.key} · {i.summary}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </div>
+            <details className="form-disclosure">
+              <summary>
+                More options <span>Cycle, points, due date, labels and parent</span>
+              </summary>
+              <div className="form-disclosure-content">
+                <div className="form-row three">
+                  <label>
+                    Sprint
+                    <select
+                      name="sprint_id"
+                      key={`${projectId}-sprint`}
+                      defaultValue={String(defaults.sprint_id || '')}
+                    >
+                      <option value="">Backlog</option>
+                      {sprints.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Story points
+                    <input
+                      type="number"
+                      min={0}
+                      max={1000}
+                      name="story_points"
+                      placeholder="0"
+                      defaultValue={Number(defaults.story_points) || 0}
+                    />
+                  </label>
+                  <label>
+                    Due date
+                    <input type="date" name="due_date" />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label>
+                    Labels
+                    <input
+                      name="labels"
+                      placeholder="Design, Frontend"
+                      defaultValue={
+                        Array.isArray(defaults.labels)
+                          ? defaults.labels.join(', ')
+                          : String(defaults.labels || '')
+                      }
+                    />
+                  </label>
+                  <label>
+                    Parent issue
+                    <select name="parent_id" defaultValue={String(defaults.parent_id || '')}>
+                      <option value="">No parent</option>
+                      {data.issues
+                        .filter(
+                          (i) =>
+                            i.project_id === projectId &&
+                            ['epic', 'story', 'task', 'bug'].includes(i.type),
+                        )
+                        .map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {i.key} · {i.summary}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </details>
           </div>
           <div className="modal-footer">
-            <span>Small steps move big things.</span>
+            <span className="spacer" />
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
@@ -1191,7 +1114,7 @@ function CreateProject({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <Modal title="A new home for your next big thing" onClose={onClose}>
+    <Modal title="Create project" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body">
           <label>

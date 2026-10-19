@@ -3,6 +3,7 @@ import type { Bootstrap } from '../shared/types';
 import type { OrganizationWork, OrganizationWorkKind } from '../shared/organization';
 export interface AppContextValue {
   data: Bootstrap;
+  connection?: 'connecting' | 'connected' | 'offline';
   refresh: () => Promise<void>;
   run: <T>(task: () => Promise<T>, message?: string) => Promise<T | undefined>;
   toast: (message: string, error?: boolean, action?: { label: string; run: () => void }) => void;

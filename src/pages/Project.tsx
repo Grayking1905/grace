@@ -74,6 +74,7 @@ import { CreateSprint, CompleteSprint } from '../components/SprintDialogs';
 import { ProjectModules, ProjectCycles } from './Planning';
 import { ProjectAdministration } from './Administration';
 import { BacklogRankControls } from '../components/IssueTools';
+import { CopyButton } from '../components/CopyButton';
 
 export function ProjectPage() {
   const { projectId, view = 'board' } = useParams();
@@ -121,22 +122,7 @@ export function ProjectPage() {
         <div className="project-heading-actions">
           <AvatarGroup users={people} />
           <span className="vertical-divider" />
-          <Button
-            variant="secondary"
-            onClick={() => navigator.clipboard.writeText(window.location.href).catch(() => {})}
-          >
-            <ExternalLink size={14} />
-            <span>Copy link</span>
-          </Button>
-          <Button
-            onClick={() =>
-              openCreateMenu ? openCreateMenu() : openCreate({ project_id: project.id })
-            }
-            disabled={data.user.role === 'viewer'}
-          >
-            <Plus size={16} />
-            Create
-          </Button>
+          <CopyButton text={() => window.location.href} label="Copy link" />
         </div>
       </div>
       <div className="project-tabs">

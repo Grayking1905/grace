@@ -9,9 +9,16 @@ export const dashboardSections = [
 export type DashboardSection = (typeof dashboardSections)[number];
 export const teamCapabilities = ['work', 'brds', 'daily', 'versions'] as const;
 export type TeamCapability = (typeof teamCapabilities)[number];
-export type TeamRole = 'lead' | 'member' | 'viewer';
+export type TeamRole = 'manager' | 'lead' | 'member' | 'viewer';
+export const teamRoleLabels: Record<TeamRole, string> = {
+  manager: 'Team Manager',
+  lead: 'Team Lead',
+  member: 'Member',
+  viewer: 'Viewer',
+};
 export type TeamPermissions = Record<TeamRole, TeamCapability[]>;
 export const defaultTeamPermissions: TeamPermissions = {
+  manager: [...teamCapabilities],
   lead: [...teamCapabilities],
   member: ['work', 'brds', 'daily'],
   viewer: [],
@@ -40,6 +47,7 @@ export interface OrganizationContext {
   teams: OrganizationTeam[];
   employee: EmployeeProfile;
   can_admin: boolean;
+  can_manage_team?: boolean;
 }
 export type OrganizationWorkKind = 'brd' | 'daily' | 'version';
 export const workStates = ['draft', 'planned', 'active', 'review', 'done'] as const;
@@ -73,7 +81,7 @@ export function canTeamCreate(
   return (
     !!team &&
     team.id === context.employee.team_id &&
-    team.permissions[context.employee.team_role].includes(capability)
+    (team.permissions[context.employee.team_role] || []).includes(capability)
   );
 }
 export const workKindLabels = { brd: 'BRD', daily: 'Daily task', version: 'Version' };

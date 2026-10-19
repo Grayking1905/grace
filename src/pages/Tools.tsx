@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import type { Issue, Page, SavedView } from '../../shared/types';
 import { useGrace } from '../context';
+import { CopyButton } from '../components/CopyButton';
 import { api, post, patch, download, exportIssues } from '../lib/api';
 import {
   Avatar,
@@ -73,7 +74,7 @@ export function PagesPage() {
       <div className="page-heading">
         <div>
           <span className="eyebrow">KEEP THE CONTEXT CLOSE</span>
-          <h1>A shared place for good ideas.</h1>
+          <h1>Documents</h1>
           <p>The plans, decisions, and little details that bring work to life.</p>
         </div>
         <Button onClick={() => setCreating(true)} disabled={data.user.role === 'viewer'}>
@@ -429,7 +430,7 @@ export function ReportsPage() {
       <div className="page-heading">
         <div>
           <span className="eyebrow">PROGRESS, WITH PERSPECTIVE</span>
-          <h1>The bigger picture.</h1>
+          <h1>Reports</h1>
           <p>A clearer view of how your team is moving forward.</p>
         </div>
         <Button
@@ -667,7 +668,7 @@ export function TeamPage() {
       <div className="page-heading">
         <div>
           <span className="eyebrow">GOOD WORK IS A TEAM SPORT</span>
-          <h1>Your people.</h1>
+          <h1>People</h1>
           <p>Different strengths. A shared direction.</p>
         </div>
         <div className="heading-actions">
@@ -690,7 +691,7 @@ export function TeamPage() {
       </div>
       <div className="workspace-toolbar">
         <div className="tabs">
-          <button className="active">Workspace members</button>
+          <span className="directory-caption">Organization members</span>
         </div>
         <div className="search-field">
           <Search size={15} />
@@ -821,17 +822,7 @@ export function TeamPage() {
                 value={inviteUrl}
                 onFocus={(e) => e.target.select()}
               />
-              <Button
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(inviteUrl)
-                    .then(() => run(async () => ({ ok: true }), 'Invitation link copied.'))
-                    .catch(() => {})
-                }
-              >
-                <Copy size={14} />
-                Copy invitation link
-              </Button>
+              <CopyButton text={inviteUrl} label="Copy invitation link" />
             </div>
           ) : (
             <form
@@ -856,8 +847,8 @@ export function TeamPage() {
                   </select>
                 </label>
                 <p>
-                  Grace creates an invitation link for you to share. Email delivery will be added in
-                  a later milestone.
+                  Share the invitation link with your teammate. Organization admins can also assign
+                  an employee ID and team from Teams & roles.
                 </p>
               </div>
               <div className="modal-footer">
@@ -872,7 +863,19 @@ export function TeamPage() {
 }
 
 export function ManagerPage() {
-  const { data, run, openIssue } = useGrace();
+  const { data: workspace, run, openIssue } = useGrace();
+  const data = useMemo(() => {
+    if (workspace.organization?.can_admin || !workspace.user.team_id) return workspace;
+    const members = workspace.members.filter((m) => m.team_id === workspace.user.team_id);
+    const ids = new Set(members.map((m) => m.id));
+    return {
+      ...workspace,
+      members,
+      issues: workspace.issues.filter((i) => ids.has(i.assignee_id || i.reporter_id)),
+      standups: workspace.standups.filter((s) => ids.has(s.user_id)),
+      risks: workspace.risks.filter((r) => ids.has(r.owner_id)),
+    };
+  }, [workspace]);
   const [tab, setTab] = useState('capacity');
   const [hoursPerPoint, setHoursPerPoint] = useState(4);
   const [standupOpen, setStandupOpen] = useState(false);
@@ -915,12 +918,12 @@ export function ManagerPage() {
       <div className="page-heading">
         <div>
           <span className="eyebrow">LOOK AFTER THE WORK. AND THE PEOPLE.</span>
-          <h1>A little room to lead.</h1>
+          <h1>Team planning</h1>
           <p>Stay close to your team, without getting in their way.</p>
         </div>
         <Badge tone="lavender">
           <Sparkles size={12} />
-          Manager suite
+          Capacity & check-ins
         </Badge>
       </div>
       <div className="manager-summary">
@@ -1186,18 +1189,7 @@ export function ManagerPage() {
                 <option value={14}>Last 14 days</option>
                 <option value={30}>Last 30 days</option>
               </select>
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  navigator.clipboard
-                    .writeText(digestText)
-                    .then(() => run(async () => ({ ok: true }), 'Digest copied.'))
-                    .catch(() => {})
-                }
-              >
-                <Copy size={14} />
-                Copy
-              </Button>
+              <CopyButton text={digestText} label="Copy digest" />
               <Button onClick={() => download('grace-weekly-digest.md', digestText)}>
                 <Download size={14} />
                 Download
@@ -1417,7 +1409,7 @@ export function ViewsPage() {
       <div className="page-heading">
         <div>
           <span className="eyebrow">A DIFFERENT LENS. THE SAME GOOD WORK.</span>
-          <h1>{selected?.name || 'Views'}</h1>
+          <h1>{selected?.name || 'Saved views'}</h1>
           <p>Find your focus with Grace Query Language and saved views.</p>
         </div>
         <div className="heading-actions">

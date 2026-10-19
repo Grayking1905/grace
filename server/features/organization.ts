@@ -21,7 +21,7 @@ export const employeeIdSchema = z
   .trim()
   .toUpperCase()
   .regex(/^[A-Z0-9][A-Z0-9_-]{1,39}$/, 'Use 2–40 letters, numbers, hyphens or underscores.');
-export const teamRoleSchema = z.enum(['lead', 'member', 'viewer']);
+export const teamRoleSchema = z.enum(['manager', 'lead', 'member', 'viewer']);
 const capabilities = z
   .array(z.enum(teamCapabilities))
   .max(4)
@@ -40,6 +40,7 @@ const teamBody = z.object({
     .transform((v) => [...new Set(v)]),
   permissions: z
     .object({
+      manager: capabilities.default(defaultTeamPermissions.manager),
       lead: capabilities,
       member: capabilities,
       viewer: z.array(z.enum(teamCapabilities)).max(0),
@@ -157,6 +158,14 @@ export function registerOrganizationRoutes({
   broadcast,
 }: Context) {
   const admin = (req: Request) => ['owner', 'admin'].includes(req.user.role);
+  function manageTeam(req: Request) {
+    canWrite(req);
+    if (!admin(req) && req.user.team_role !== 'manager')
+      throw new HttpError(
+        403,
+        'A team manager or organization administrator must make this change.',
+      );
+  }
   const context = (req: Request) =>
     organizationContext(db, req.workspaceId, req.user.id, req.user.role);
   async function team(req: Request, teamId: string, capability?: TeamCapability) {
@@ -230,16 +239,18 @@ export function registerOrganizationRoutes({
     res.json(await team(req, teamId));
   });
   app.get('/api/v1/organization/employees', async (req, res) => {
-    canAdmin(req);
+    manageTeam(req);
     res.json(
       await db.all(
-        'SELECT e.*,u.name,u.email,u.color,m.role,CASE WHEN md.user_id IS NULL THEN 1 ELSE 0 END AS active FROM employee_profiles e JOIN users u ON u.id=e.user_id JOIN memberships m ON m.workspace_id=e.workspace_id AND m.user_id=e.user_id LEFT JOIN member_deactivations md ON md.workspace_id=e.workspace_id AND md.user_id=e.user_id WHERE e.workspace_id=? ORDER BY u.name',
-        [req.workspaceId],
+        'SELECT e.*,u.name,u.email,u.color,m.role,CASE WHEN md.user_id IS NULL THEN 1 ELSE 0 END AS active FROM employee_profiles e JOIN users u ON u.id=e.user_id JOIN memberships m ON m.workspace_id=e.workspace_id AND m.user_id=e.user_id LEFT JOIN member_deactivations md ON md.workspace_id=e.workspace_id AND md.user_id=e.user_id WHERE e.workspace_id=?' +
+          (admin(req) ? '' : ' AND e.team_id=?') +
+          ' ORDER BY u.name',
+        admin(req) ? [req.workspaceId] : [req.workspaceId, req.user.team_id],
       ),
     );
   });
   app.put('/api/v1/organization/employees/:id', async (req, res) => {
-    canAdmin(req);
+    manageTeam(req);
     const userId = String(req.params.id);
     const body = z
       .object({
@@ -253,11 +264,31 @@ export function registerOrganizationRoutes({
       await db.run('UPDATE workspaces SET name=name WHERE id=?', [req.workspaceId]);
       await team(req, body.team_id);
       await requireActiveMember(db, req.workspaceId, userId, 404);
-      await availableEmployeeId(db, req.workspaceId, body.employee_id, userId);
-      const old = await db.one<{ team_id: string }>(
-        'SELECT team_id FROM employee_profiles WHERE workspace_id=? AND user_id=?',
+      const old = await db.one<{
+        team_id: string;
+        employee_id: string;
+        team_role: string;
+        role: string;
+      }>(
+        'SELECT e.team_id,e.employee_id,e.team_role,m.role FROM employee_profiles e JOIN memberships m ON m.workspace_id=e.workspace_id AND m.user_id=e.user_id WHERE e.workspace_id=? AND e.user_id=?',
         [req.workspaceId, userId],
       );
+      if (!old || (!admin(req) && old.team_id !== req.user.team_id))
+        throw new HttpError(404, 'Employee not found.');
+      if (
+        !admin(req) &&
+        (body.employee_id !== old.employee_id ||
+          body.team_id !== old.team_id ||
+          body.team_role === 'manager' ||
+          old.team_role === 'manager' ||
+          ['owner', 'admin'].includes(old.role) ||
+          userId === req.user.id)
+      )
+        throw new HttpError(
+          403,
+          'Only organization admins can change employee IDs, teams or managers.',
+        );
+      await availableEmployeeId(db, req.workspaceId, body.employee_id, userId);
       if (
         old?.team_id !== body.team_id &&
         (await db.one(
@@ -284,6 +315,37 @@ export function registerOrganizationRoutes({
     });
     broadcast(req);
     res.json({ ok: true });
+  });
+  app.patch('/api/v1/organization/teams/:id/layout', async (req, res) => {
+    manageTeam(req);
+    const teamId = String(req.params.id);
+    const body = teamBody
+      .omit({ permissions: true })
+      .extend({ version: z.number().int().positive() })
+      .strict()
+      .parse(req.body);
+    await db.transaction(async () => {
+      await team(req, teamId);
+      if (
+        !(await db.run(
+          'UPDATE organization_teams SET name=?,description=?,color=?,sections=?,version=version+1,updated_at=? WHERE id=? AND workspace_id=? AND version=?',
+          [
+            body.name,
+            body.description,
+            body.color,
+            JSON.stringify(body.sections),
+            now(),
+            teamId,
+            req.workspaceId,
+            body.version,
+          ],
+        ))
+      )
+        throw new HttpError(409, 'This dashboard changed. Refresh before saving.', 'EDIT_CONFLICT');
+      await audit(req, 'team.layout.updated', teamId, body.name);
+    });
+    broadcast(req);
+    res.json(await team(req, teamId));
   });
   const capabilityFor = (kind: string): TeamCapability =>
     kind === 'brd' ? 'brds' : kind === 'version' ? 'versions' : 'daily';
@@ -329,11 +391,14 @@ export function registerOrganizationRoutes({
     if (
       write &&
       !admin(req) &&
-      req.user.team_role !== 'lead' &&
+      !['manager', 'lead'].includes(req.user.team_role || '') &&
       row.owner_id !== req.user.id &&
       row.created_by !== req.user.id
     )
-      throw new HttpError(403, 'Only the owner, author or team lead can edit this item.');
+      throw new HttpError(
+        403,
+        'Only the owner, author, team lead or Team Manager can edit this item.',
+      );
     return row;
   }
   async function validate(req: Request, body: z.infer<typeof bodySchema>) {
@@ -492,6 +557,7 @@ export function registerOrganizationRoutes({
       const old = await record(req, workId, true);
       if (old.version !== version)
         throw new HttpError(409, 'This item changed. Refresh before deleting.', 'EDIT_CONFLICT');
+      await audit(req, `${old.kind}.deleted`, workId, String(old.title));
       await db.run('DELETE FROM organization_work_issues WHERE work_id=?', [workId]);
       if (
         !(await db.run(
@@ -500,7 +566,6 @@ export function registerOrganizationRoutes({
         ))
       )
         throw new HttpError(409, 'This item changed. Refresh before deleting.');
-      await audit(req, `${old.kind}.deleted`, workId, String(old.title));
     });
     broadcast(req);
     res.json({ ok: true });
