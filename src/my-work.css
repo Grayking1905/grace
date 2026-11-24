@@ -1,0 +1,552 @@
+/* ==========================================================================
+   Grace - My Work Styles (Aligned with Home Section Aesthetics)
+   ========================================================================== */
+
+.mywork-page {
+  max-width: 1580px;
+  margin-inline: auto;
+  padding-bottom: 36px;
+}
+
+.mywork-page .page-heading {
+  margin-bottom: 22px;
+  align-items: center;
+  gap: 16px;
+}
+
+.mywork-kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: #738173;
+  margin-bottom: 9px;
+}
+
+.mywork-kicker > span:not(.home-workspace-dot) {
+  color: #c3cbbb;
+}
+
+/* Quick Add Task Bar */
+.mywork-quick-add {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  margin-bottom: 22px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mywork-quick-add:focus-within {
+  border-color: #659275;
+  box-shadow: 0 0 0 3px rgba(101, 146, 117, 0.12);
+}
+
+.mywork-quick-add-icon {
+  color: #728c78;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.mywork-quick-add input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  font-size: 14px;
+  outline: none;
+  color: var(--text);
+  min-width: 0;
+}
+
+.mywork-quick-add input::placeholder {
+  color: #9aa89c;
+}
+
+.mywork-quick-add button {
+  flex-shrink: 0;
+}
+
+/* Toolbar & Filters */
+.mywork-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.mywork-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.mywork-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mywork-tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.mywork-tab-button:hover {
+  color: var(--text);
+  background: #f4f7f2;
+}
+
+.mywork-tab-button.active {
+  color: #274b35;
+  background: #ebf3e9;
+  border-color: #d6e5d2;
+  font-weight: 600;
+}
+
+.mywork-tab-count {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  color: inherit;
+  font-weight: 600;
+}
+
+.mywork-tab-button.active .mywork-tab-count {
+  background: #d4e6cf;
+  color: #1e3b2a;
+}
+
+.mywork-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.mywork-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mywork-filter-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.mywork-filter-select select {
+  height: 34px;
+  font-size: 13px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+/* Needs Attention Section */
+.mywork-attention-box {
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  background: #fdfaf6;
+  border: 1px solid #fae8d4;
+  border-radius: 12px;
+}
+
+.mywork-attention-box header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mywork-attention-box header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #975b28;
+  margin: 0;
+}
+
+.mywork-attention-items {
+  display: grid;
+  gap: 8px;
+}
+
+.mywork-attention-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid #f3e2cd;
+  border-radius: 8px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mywork-attention-row:hover {
+  border-color: #e4caa9;
+  background: #fffdf9;
+}
+
+.mywork-attention-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mywork-attention-left strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mywork-attention-left small {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.mywork-attention-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Group Headers */
+.mywork-group {
+  margin-bottom: 18px;
+}
+
+.mywork-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #f7faf5;
+  border-bottom: 1px solid #edf1ea;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a5c4d;
+}
+
+.mywork-group-header > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mywork-group-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Side Column Cards */
+.mywork-side-card {
+  padding: 22px;
+  min-width: 0;
+}
+
+.mywork-side-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.mywork-side-card > header h2 {
+  font-size: 16px;
+  letter-spacing: -0.2px;
+  margin: 0;
+}
+
+.mywork-side-card > header p {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+/* Standup Brief Card */
+.mywork-standup-sections {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.mywork-standup-block {
+  padding: 12px 14px;
+  background: #f8faf6;
+  border: 1px solid #edf2e8;
+  border-radius: 8px;
+}
+
+.mywork-standup-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #49634e;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.mywork-standup-block ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.mywork-standup-block li {
+  margin-bottom: 3px;
+  overflow-wrap: anywhere;
+}
+
+.mywork-standup-block p.empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.mywork-standup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.mywork-standup-footer small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Project Progress in Side Card */
+.mywork-project-rows {
+  display: grid;
+  gap: 14px;
+}
+
+.mywork-project-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf1ea;
+}
+
+.mywork-project-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mywork-project-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mywork-project-item-top a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mywork-project-item-top a:hover {
+  color: var(--green);
+}
+
+.mywork-project-item-top small {
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.mywork-project-item-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Personal Activity List */
+.mywork-activity-list {
+  display: grid;
+  gap: 12px;
+}
+
+.mywork-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf1ea;
+  text-align: left;
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  cursor: pointer;
+  width: 100%;
+}
+
+.mywork-activity-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mywork-activity-row:hover strong {
+  color: var(--green);
+}
+
+.mywork-activity-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #89b392;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.mywork-activity-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.mywork-activity-text strong {
+  color: var(--text);
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.mywork-activity-time {
+  font-size: 11px;
+  color: #92a093;
+  margin-top: 3px;
+}
+
+/* Priority & Chip Badges */
+.mywork-priority-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  text-transform: capitalize;
+}
+
+.mywork-priority-chip.critical {
+  background: #faeded;
+  color: #a94442;
+}
+
+.mywork-priority-chip.high {
+  background: #fdf2e8;
+  color: #b36b2f;
+}
+
+.mywork-priority-chip.medium {
+  background: #f7f9f3;
+  color: #607963;
+}
+
+.mywork-priority-chip.low,
+.mywork-priority-chip.lowest {
+  background: #f2f5f9;
+  color: #6a82a0;
+}
+
+/* Relative Due Date Formatting */
+.mywork-due-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mywork-due-chip.overdue {
+  color: #ad5940;
+  font-weight: 600;
+}
+
+.mywork-due-chip.today {
+  color: #3b749e;
+  font-weight: 600;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1080px) {
+  .mywork-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .mywork-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .mywork-filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .mywork-filter-controls {
+    flex-wrap: wrap;
+  }
+}

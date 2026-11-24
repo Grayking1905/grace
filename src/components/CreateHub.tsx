@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useMemo, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import {
@@ -23,6 +23,12 @@ import { useGrace } from '../context';
 import { api, post, patch } from '../lib/api';
 import { Badge, Button, Modal } from './ui';
 import { Editor } from './Editor';
+import {
+  LinkedUrlsField,
+  type LinkedUrlItem,
+  parseUrlsFromHtml,
+  mergeUrlsIntoDescription,
+} from './LinkedUrlsField';
 
 export function CreateHub({ onClose }: { onClose: () => void }) {
   const { data, openCreate, openWork, openProjectCreate } = useGrace();
@@ -169,7 +175,12 @@ export function OrganizationWorkDialog({
     item?.team_id || teamId || data.organization?.employee.team_id || '',
   );
   const [projectId, setProjectId] = useState(item?.project_id || '');
-  const [content, setContent] = useState(item?.content || initialContent[kind]);
+  const initialParsed = useMemo(
+    () => parseUrlsFromHtml(item?.content || initialContent[kind]),
+    [item?.content, kind],
+  );
+  const [content, setContent] = useState(initialParsed.cleanHtml);
+  const [linkedUrls, setLinkedUrls] = useState<LinkedUrlItem[]>(initialParsed.urls);
   const [linked, setLinked] = useState<string[]>(item?.issue_ids || []);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -203,12 +214,13 @@ export function OrganizationWorkDialog({
     event.preventDefault();
     setBusy(true);
     const values = Object.fromEntries(new FormData(event.currentTarget));
+    const finalContent = mergeUrlsIntoDescription(content, linkedUrls);
     const body = {
       ...values,
       kind,
       team_id: selectedTeam,
       project_id: projectId || null,
-      content,
+      content: finalContent,
       issue_ids: linked,
       version: item?.version,
     };
@@ -359,6 +371,12 @@ export function OrganizationWorkDialog({
               </label>
             )}
           </fieldset>
+          <LinkedUrlsField
+            urls={linkedUrls}
+            onChange={setLinkedUrls}
+            kind={kind}
+            disabled={!writable || busy}
+          />
           <details
             className="form-disclosure"
             open={kind !== 'daily' || !!item?.content.replace(/<[^>]*>/g, '').trim()}

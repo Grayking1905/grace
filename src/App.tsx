@@ -40,6 +40,13 @@ import { PublicAccountPage } from './pages/Accounts';
 import { projectTemplates } from '../shared/templates';
 import type { OrganizationWork, OrganizationWorkKind } from '../shared/organization';
 import { CreateHub, OrganizationWorkDialog } from './components/CreateHub';
+import {
+  LinkedUrlsField,
+  type LinkedUrlItem,
+  parseUrlsFromHtml,
+  normalizeUrl,
+  mergeUrlsIntoDescription,
+} from './components/LinkedUrlsField';
 import { AppNavigation } from './components/AppNavigation';
 import { teamRoleLabels } from '../shared/organization';
 import './organization.css';
@@ -861,21 +868,66 @@ function CreateIssue({
         '',
     ),
   );
-  const [description, setDescription] = useState(String(defaults.description || ''));
+  const selectedProject = data.projects.find((p) => p.id === projectId);
+  const initialData = useMemo(() => {
+    const parsed = parseUrlsFromHtml(String(defaults.description || ''));
+    let urls = [...parsed.urls];
+    if (urls.length === 0) {
+      const defaultUrl =
+        typeof defaults.url === 'string'
+          ? defaults.url
+          : typeof defaults.target_url === 'string'
+            ? defaults.target_url
+            : '';
+      if (defaultUrl.trim()) {
+        const norm = normalizeUrl(defaultUrl);
+        if (norm) {
+          urls = [
+            {
+              url: norm,
+              label: defaults.creation_kind === 'Bug' ? 'Affected page' : 'Target page',
+            },
+          ];
+        }
+      }
+    }
+    return {
+      cleanDescription: parsed.cleanHtml,
+      urls,
+    };
+  }, [defaults.description, defaults.url, defaults.target_url, defaults.creation_kind]);
+
+  const [description, setDescription] = useState(initialData.cleanDescription);
+  const [linkedUrls, setLinkedUrls] = useState<LinkedUrlItem[]>(initialData.urls);
+  const [issueType, setIssueType] = useState<string>(
+    String(
+      selectedProject?.issue_types?.includes(defaults.type as Issue['type'])
+        ? defaults.type
+        : selectedProject?.default_type || 'task',
+    ),
+  );
   const [busy, setBusy] = useState(false);
   const statuses = data.statuses.filter((s) => s.project_id === projectId);
-  const selectedProject = data.projects.find((p) => p.id === projectId);
   const sprints = data.sprints.filter((s) => s.project_id === projectId && s.state !== 'closed');
+
+  const urlKind: 'bug' | 'feature' | 'issue' =
+    defaults.creation_kind === 'Bug' || issueType === 'bug'
+      ? 'bug'
+      : defaults.creation_kind === 'New feature' || issueType === 'story'
+        ? 'feature'
+        : 'issue';
+
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setBusy(true);
     const values = Object.fromEntries(new FormData(e.currentTarget));
+    const finalDescription = mergeUrlsIntoDescription(description, linkedUrls);
     const created = await run(
       () =>
         post<Issue>('/issues', {
           ...values,
           project_id: projectId,
-          description,
+          description: finalDescription,
           assignee_id: values.assignee_id || null,
           sprint_id: values.sprint_id || null,
           parent_id: values.parent_id || null,
@@ -925,7 +977,17 @@ function CreateIssue({
             <div className="form-row">
               <label>
                 Project
-                <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <select
+                  value={projectId}
+                  onChange={(e) => {
+                    const newProjId = e.target.value;
+                    setProjectId(newProjId);
+                    const newProj = data.projects.find((p) => p.id === newProjId);
+                    if (newProj && !newProj.issue_types?.includes(issueType as Issue['type'])) {
+                      setIssueType(newProj.default_type || 'task');
+                    }
+                  }}
+                >
                   {writableProjects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} · {p.key}
@@ -938,11 +1000,8 @@ function CreateIssue({
                 <select
                   name="type"
                   key={`${projectId}-type`}
-                  defaultValue={String(
-                    selectedProject?.issue_types?.includes(defaults.type as Issue['type'])
-                      ? defaults.type
-                      : selectedProject?.default_type || 'task',
-                  )}
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value)}
                 >
                   {(
                     selectedProject?.issue_types || ['task', 'story', 'bug', 'epic', 'subtask']
@@ -965,7 +1024,8 @@ function CreateIssue({
                 autoFocus
               />
             </label>
-            <details className="form-disclosure" open={!!defaults.description}>
+            <LinkedUrlsField urls={linkedUrls} onChange={setLinkedUrls} kind={urlKind} />
+            <details className="form-disclosure" open={!!description || !!defaults.description}>
               <summary>Description</summary>
               <div className="form-disclosure-content">
                 <Editor content={description} onChange={setDescription} compact />
