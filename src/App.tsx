@@ -90,6 +90,12 @@ const SettingsPage = lazy(() =>
 const AdministrationPage = lazy(() =>
   import('./pages/Administration').then((m) => ({ default: m.AdministrationPage })),
 );
+const AdminInsightsPage = lazy(() =>
+  import('./pages/AdminInsights').then((m) => ({ default: m.AdminInsightsPage })),
+);
+const SandboxPage = lazy(() =>
+  import('./pages/Sandbox').then((m) => ({ default: m.SandboxPage })),
+);
 
 type Toast = {
   id: number;
@@ -281,6 +287,8 @@ export default function App() {
             <Route path="/views/:viewId?" element={<ViewsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/administration" element={<AdministrationPage />} />
+            <Route path="/admin-insights" element={<AdminInsightsPage />} />
+            <Route path="/sandbox" element={<SandboxPage />} />
             <Route path="/security" element={<AccountSecurityPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/portfolio" element={<PortfolioPage />} />
@@ -398,6 +406,8 @@ function Shell({
       '/manager': 'Team planning',
       '/settings': 'Settings',
       '/administration': 'Administration',
+      '/admin-insights': 'Admin insights',
+      '/sandbox': 'Sandbox',
       '/security': 'Account security',
       '/templates': 'Issue templates',
       '/portfolio': 'Portfolio',
