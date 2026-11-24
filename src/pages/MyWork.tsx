@@ -230,7 +230,7 @@ export function OrganizationMyWork() {
       const text =
         e.source === 'issue'
           ? `${e.item.key} ${e.item.summary} ${e.item.description || ''}`
-          : `${e.item.title} ${e.item.description || ''}`;
+          : `${e.item.title} ${e.item.content || ''}`;
       return text.toLowerCase().includes(search.toLowerCase());
     });
   }, [attentionItems, search]);
@@ -396,7 +396,7 @@ export function OrganizationMyWork() {
           const label =
             entry.source === 'issue'
               ? `${entry.item.key} ${entry.item.summary} ${entry.item.description || ''}`
-              : `${entry.item.title} ${entry.item.description || ''}`;
+              : `${entry.item.title} ${entry.item.content || ''}`;
           if (!label.toLowerCase().includes(search.toLowerCase())) {
             return false;
           }
@@ -412,7 +412,14 @@ export function OrganizationMyWork() {
   }, [allEntries, view, type, projectId, priorityFilter, search, data.user.id, today]);
 
   // Grouped entries if grouping is active
-  const groupedSections = useMemo(() => {
+  type GroupedSection = {
+    key: string;
+    title: string;
+    color?: string;
+    entries: Entry[];
+  };
+
+  const groupedSections = useMemo((): GroupedSection[] => {
     if (groupBy === 'none') {
       return [{ key: 'all', title: '', entries: filteredEntries }];
     }
@@ -437,7 +444,7 @@ export function OrganizationMyWork() {
     }
 
     if (groupBy === 'status') {
-      const groups = [
+      const groups: GroupedSection[] = [
         { key: 'active', title: 'In progress', entries: [] as Entry[] },
         { key: 'todo', title: 'To do', entries: [] as Entry[] },
         { key: 'done', title: 'Completed', entries: [] as Entry[] },
@@ -459,7 +466,7 @@ export function OrganizationMyWork() {
     }
 
     if (groupBy === 'date') {
-      const groups = [
+      const groups: GroupedSection[] = [
         { key: 'overdue', title: 'Overdue', entries: [] as Entry[] },
         { key: 'today', title: 'Due today', entries: [] as Entry[] },
         { key: 'upcoming', title: 'Due later', entries: [] as Entry[] },
@@ -892,7 +899,7 @@ export function OrganizationMyWork() {
             <X size={15} />
           </button>
         )}
-        <Button size="small" type="submit" disabled={!quickTitle.trim() || quickSaving}>
+        <Button type="submit" disabled={!quickTitle.trim() || quickSaving}>
           {quickSaving ? 'Saving…' : 'Add task'}
         </Button>
       </form>
@@ -1055,7 +1062,6 @@ export function OrganizationMyWork() {
                             : 'Due today'}
                         </span>
                         <Button
-                          size="small"
                           variant="secondary"
                           onClick={() =>
                             isIssue
