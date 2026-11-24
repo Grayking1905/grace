@@ -381,3 +381,55 @@
     font-size: 13px;
   }
 }
+
+/* Quick links (Insights & Sandbox) */
+.administration-quick-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.administration-quick-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--surface, #fff);
+  border: 1.5px solid var(--line, #e5e7eb);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text, #111);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.administration-quick-link:hover {
+  border-color: #0070f3;
+  box-shadow: 0 2px 10px rgba(0,112,243,0.1);
+}
+.administration-quick-link-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #0070f3 10%, transparent);
+  color: #0070f3;
+  flex-shrink: 0;
+}
+.administration-quick-link > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.administration-quick-link strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.administration-quick-link span {
+  font-size: 12.5px;
+  color: var(--muted, #666);
+}
+.administration-quick-link-arrow {
+  color: var(--muted, #666);
+  flex-shrink: 0;
+}

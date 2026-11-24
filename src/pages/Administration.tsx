@@ -14,6 +14,8 @@ import {
   Trash2,
   Users,
   Building2,
+  BarChart3,
+  FlaskConical,
 } from 'lucide-react';
 import type {
   ActiveSession,
@@ -128,6 +130,33 @@ export function AdministrationPage() {
           <ArrowUpRight size={16} />
         </Link>
       </div>
+
+      {/* Quick links to insights & sandbox for admins */}
+      {admin && (
+        <div className="administration-quick-links">
+          <Link to="/admin-insights" className="administration-quick-link">
+            <span className="administration-quick-link-icon">
+              <BarChart3 size={22} />
+            </span>
+            <div>
+              <strong>Admin insights</strong>
+              <span>Monitor app usage, adoption, and security posture.</span>
+            </div>
+            <ArrowUpRight size={16} className="administration-quick-link-arrow" />
+          </Link>
+          <Link to="/sandbox" className="administration-quick-link">
+            <span className="administration-quick-link-icon">
+              <FlaskConical size={22} />
+            </span>
+            <div>
+              <strong>Sandbox</strong>
+              <span>Safely test apps and control updates in an isolated environment.</span>
+            </div>
+            <ArrowUpRight size={16} className="administration-quick-link-arrow" />
+          </Link>
+        </div>
+      )}
+
       <div className="administration-layout">
         <nav aria-label="Administration sections">
           {tabs.map((item) => (

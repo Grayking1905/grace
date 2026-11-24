@@ -366,6 +366,48 @@ CREATE TABLE IF NOT EXISTS sprint_issue_snapshots (
   FOREIGN KEY(issue_id) REFERENCES issues(id)
 );
 
+CREATE TABLE IF NOT EXISTS sandboxes (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  name VARCHAR(80) NOT NULL,
+  description TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'creating',
+  production_snapshot VARCHAR(32) NOT NULL,
+  last_synced VARCHAR(32),
+  created_by_id VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(created_by_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_projects (
+  id VARCHAR(64) PRIMARY KEY,
+  sandbox_id VARCHAR(64) NOT NULL,
+  source_project_id VARCHAR(64) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(sandbox_id) REFERENCES sandboxes(id)
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_issues (
+  id VARCHAR(64) PRIMARY KEY,
+  sandbox_id VARCHAR(64) NOT NULL,
+  source_issue_id VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(sandbox_id) REFERENCES sandboxes(id)
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_apps (
+  id VARCHAR(64) PRIMARY KEY,
+  sandbox_id VARCHAR(64) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  version VARCHAR(40) NOT NULL,
+  installed_at VARCHAR(32) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'installed',
+  FOREIGN KEY(sandbox_id) REFERENCES sandboxes(id)
+);
+
 CREATE TABLE IF NOT EXISTS module_members (
   module_id VARCHAR(64) NOT NULL,
   user_id VARCHAR(64) NOT NULL,
