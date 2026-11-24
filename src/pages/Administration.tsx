@@ -27,7 +27,7 @@ import type {
   WorkspaceMembership,
 } from '../../shared/administration';
 import { useGrace } from '../context';
-import { api, patch, post } from '../lib/api';
+import { api, patch, post, put, del } from '../lib/api';
 import { Avatar, Badge, Button, Empty, Modal, formatDate } from '../components/ui';
 import '../administration.css';
 
@@ -754,12 +754,23 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
   const [remove, setRemove] = useState<{ id: string; name: string } | null>(null);
   const [archive, setArchive] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [teamAssignments, setTeamAssignments] = useState<string[] | null>(null);
+  const isWorkspaceAdmin = ['owner', 'admin'].includes(data.user.role);
+
   const members = useQuery({
     queryKey: ['project-members', data.workspace.id, projectId],
     queryFn: () => api<ProjectMemberships>(`/projects/${projectId}/members`),
   });
+
+  const projectTeams = useQuery<{ team_ids: string[]; version: number }>({
+    queryKey: ['project-teams', projectId],
+    queryFn: () => api(`/projects/${projectId}/teams`),
+  });
+
   if (!project) return null;
   const canManage = members.data?.can_manage === true;
+  const currentAssigned = teamAssignments ?? (projectTeams.data?.team_ids || project.team_ids || []);
   const available = data.members.filter(
     (user) => !members.data?.members.some((member) => member.id === user.id),
   );
@@ -934,6 +945,85 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
           )}
         </QueryState>
       </section>
+      {data.organization?.teams && data.organization.teams.length > 0 && (
+        <section className="panel administration-panel">
+          <div className="administration-section-heading">
+            <div>
+              <h2>Assigned Teams & Multi-Team Ownership</h2>
+              <p>Assign one, two, or multiple teams to collaborate on this project, or transfer ownership.</p>
+            </div>
+            <Badge tone="blue">{currentAssigned.length} assigned</Badge>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, margin: '14px 0' }}>
+            {data.organization.teams.map((t) => {
+              const isAssigned = currentAssigned.includes(t.id);
+              return (
+                <label
+                  key={t.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    border: `1px solid ${isAssigned ? 'var(--primary)' : 'var(--border)'}`,
+                    background: isAssigned ? 'var(--primary-subtle, #eff6ff)' : 'var(--bg-secondary)',
+                    cursor: canManage ? 'pointer' : 'default',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isAssigned}
+                    disabled={!canManage || busy}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setTeamAssignments([...currentAssigned, t.id]);
+                      } else {
+                        setTeamAssignments(currentAssigned.filter((id) => id !== t.id));
+                      }
+                    }}
+                  />
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: t.color || '#3b82f6',
+                    }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{t.name}</span>
+                </label>
+              );
+            })}
+          </div>
+
+          {canManage && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  await run(
+                    () =>
+                      put(`/projects/${projectId}/teams`, {
+                        team_ids: currentAssigned,
+                        version: projectTeams.data?.version,
+                      }),
+                    'Project team assignments saved.',
+                  );
+                  projectTeams.refetch();
+                  setBusy(false);
+                }}
+              >
+                Save assigned teams
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+
       {canManage && (
         <section className="panel administration-panel administration-archive-panel">
           <div>
@@ -946,6 +1036,29 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
           <Button variant="secondary" onClick={() => setArchive(true)}>
             <Archive size={16} />
             Archive project
+          </Button>
+        </section>
+      )}
+
+      {isWorkspaceAdmin && (
+        <section
+          className="panel administration-panel administration-archive-panel"
+          style={{ borderColor: 'var(--red-subtle, #fecaca)' }}
+        >
+          <div>
+            <h2 style={{ color: 'var(--red, #ef4444)' }}>Delete this project</h2>
+            <p>
+              Permanently delete this project along with all its issues, documentation, chats, and cycles.
+              This action cannot be undone.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            style={{ color: 'var(--red, #ef4444)', border: '1px solid currentColor' }}
+            onClick={() => setDeleteConfirm(true)}
+          >
+            <Trash2 size={16} />
+            Delete project
           </Button>
         </section>
       )}
@@ -1037,6 +1150,20 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
             if (await run(() => post(`/projects/${projectId}/archive`), 'Project archived.')) {
               setArchive(false);
               navigate('/administration');
+            }
+          }}
+        />
+      )}
+      {deleteConfirm && (
+        <Confirm
+          title={`Delete ${project.name} permanently?`}
+          text="This action will permanently remove the project and all associated issues, documents, and collaboration channels. This cannot be undone."
+          label="Delete project"
+          onClose={() => setDeleteConfirm(false)}
+          confirm={async () => {
+            if (await run(() => del(`/projects/${projectId}`), 'Project deleted.')) {
+              setDeleteConfirm(false);
+              navigate('/projects');
             }
           }}
         />

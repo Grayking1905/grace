@@ -39,6 +39,7 @@ import {
 import { Editor } from './Editor';
 import { IssuePlanningTools } from './IssueTools';
 import { TargetUrlBanner, parseUrlsFromHtml } from './LinkedUrlsField';
+import { IssueDependencies } from './IssueDependencies';
 export function IssueDrawer({ issueId, onClose }: { issueId: string; onClose: () => void }) {
   const { data, run, toast, openIssue, openCreate } = useGrace();
   const detail = useQuery({
@@ -324,30 +325,7 @@ export function IssueDrawer({ issueId, onClose }: { issueId: string; onClose: ()
               )}
             </section>
             <section>
-              <div className="detail-section-heading">
-                <h3>
-                  Linked issues <Badge>{links.length}</Badge>
-                </h3>
-                {write && (
-                  <button onClick={() => setLinkOpen(true)}>
-                    <Link2 size={13} />
-                    Link issue
-                  </button>
-                )}
-              </div>
-              {links.map((link) => (
-                <button
-                  className="linked-issue"
-                  key={link.id}
-                  onClick={() => openIssue(link.target_id)}
-                >
-                  <Link2 size={13} />
-                  <span>{link.type}</span>
-                  <strong>{link.key}</strong>
-                  <span>{link.summary}</span>
-                  <ArrowUpRight size={13} />
-                </button>
-              ))}
+              <IssueDependencies issueId={current.id} onNavigate={openIssue} />
             </section>
             <section>
               <div className="detail-section-heading">

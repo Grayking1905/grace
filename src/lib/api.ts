@@ -53,6 +53,10 @@ export const post = <T = { ok: boolean }>(path: string, body: unknown = {}) =>
   api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 export const patch = <T = { ok: boolean }>(path: string, body: unknown) =>
   api<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+export const put = <T = { ok: boolean }>(path: string, body: unknown = {}) =>
+  api<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+export const del = <T = { ok: boolean }>(path: string) =>
+  api<T>(path, { method: 'DELETE' });
 export function download(name: string, content: string, type = 'text/plain') {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement('a');

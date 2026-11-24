@@ -34,6 +34,10 @@ import {
 } from './home-events.js';
 import { registerHomeRoutes } from './features/home.js';
 import { registerInsightsRoutes, registerSandboxRoutes } from './features/insights-sandbox.js';
+import { registerDependencyRoutes } from './features/dependencies.js';
+import { registerCapacityRoutes } from './features/capacity.js';
+import { registerChatRoutes } from './features/chat.js';
+import { registerProjectDocsRoutes } from './features/project-docs.js';
 import {
   registerOrganizationRoutes,
   employeeIdSchema,
@@ -426,6 +430,10 @@ export async function createApp(
       'SELECT project_id,role FROM project_members WHERE workspace_id = ? AND user_id = ?',
       [req.workspaceId, req.user.id],
     );
+    const teamAssignments = await db.all<{ project_id: string; team_id: string }>(
+      'SELECT project_id, team_id FROM project_team_assignments WHERE workspace_id = ?',
+      [req.workspaceId],
+    );
     return projects
       .filter(
         (p) =>
@@ -436,6 +444,9 @@ export async function createApp(
       )
       .map((p) => ({
         ...p,
+        team_ids: teamAssignments
+          .filter((a) => a.project_id === p.id)
+          .map((a) => a.team_id),
         issue_types: JSON.parse(
           configurations.find((c) => c.project_id === p.id)?.issue_types ||
             '["task","story","bug","epic","subtask"]',
@@ -694,6 +705,10 @@ export async function createApp(
   registerSearchRoutes(app, db);
   registerInsightsRoutes(app, db);
   registerSandboxRoutes(app, db);
+  registerDependencyRoutes(app, db, broadcast);
+  registerCapacityRoutes(app, db, broadcast);
+  registerChatRoutes(app, db, io, broadcast);
+  registerProjectDocsRoutes(app, db, broadcast);
   registerPortfolioRoutes({ app, db, project, visibleProjects, audit, broadcast });
   registerOrganizationRoutes({ app, db, project, issue, visibleProjects, audit, broadcast });
   registerHomeRoutes({
@@ -870,6 +885,55 @@ export async function createApp(
           [field === 'archived' ? (value ? now() : null) : value, prj.id, req.workspaceId],
         );
       await audit(req, 'project.updated', prj.id, JSON.stringify(body));
+    });
+    broadcast(req);
+    res.json({ ok: true });
+  });
+  app.delete('/api/v1/projects/:id', async (req, res) => {
+    canAdmin(req);
+    const prj = await project(req, String(req.params.id), true);
+    await db.transaction(async () => {
+      // 1. Clear references in optional project_id tables
+      await db.run('UPDATE pages SET project_id = NULL WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('UPDATE organization_work SET project_id = NULL WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('UPDATE risks SET project_id = NULL WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('DELETE FROM issue_templates WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+
+      // 2. Chat channels & messages
+      const channels = await db.all<{ id: string }>('SELECT id FROM chat_channels WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      for (const ch of channels) {
+        await db.run('DELETE FROM chat_reads WHERE channel_id = ?', [ch.id]);
+        await db.run('DELETE FROM chat_messages WHERE channel_id = ?', [ch.id]);
+      }
+      await db.run('DELETE FROM chat_channels WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+
+      // 3. Project docs, team settings, configuration, members
+      await db.run('DELETE FROM project_documents WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('DELETE FROM project_team_assignments WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('DELETE FROM project_team_settings WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('DELETE FROM project_configuration WHERE project_id = ?', [prj.id]);
+      await db.run('DELETE FROM project_members WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+
+      // 4. Issues & related
+      const prjIssues = await db.all<{ id: string }>('SELECT id FROM issues WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      for (const iss of prjIssues) {
+        await db.run('DELETE FROM organization_work_issues WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM issue_history WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM issue_comments WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM issue_labels WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM issue_attachments WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM issue_dependencies WHERE source_issue_id = ? OR target_issue_id = ?', [iss.id, iss.id]);
+      }
+      await db.run('DELETE FROM issues WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+
+      // 5. Modules, sprints, statuses
+      await db.run('DELETE FROM project_modules WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('DELETE FROM sprints WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await db.run('DELETE FROM statuses WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+
+      // 6. Delete project itself
+      await db.run('DELETE FROM projects WHERE id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      await audit(req, 'project.deleted', prj.id, prj.name);
     });
     broadcast(req);
     res.json({ ok: true });
@@ -1101,34 +1165,6 @@ export async function createApp(
       created_at: now(),
     });
     await recordIssueEvent(db, req, current.id, 'worklog');
-    broadcast(req);
-    res.status(201).json({ ok: true });
-  });
-  app.post('/api/v1/issues/:id/links', async (req, res) => {
-    const current = await issue(req, String(req.params.id), true);
-    const body = z
-      .object({
-        target_id: z.string(),
-        type: z.enum(['blocks', 'relates to', 'duplicates']),
-      })
-      .parse(req.body);
-    const target = await issue(req, body.target_id);
-    if (target.id === current.id) throw new HttpError(400, 'An issue cannot link to itself.');
-    if (
-      !(await db.one(
-        'SELECT id FROM issue_links WHERE source_id = ? AND target_id = ? AND type = ?',
-        [current.id, target.id, body.type],
-      ))
-    ) {
-      await db.insert('issue_links', {
-        id: id(),
-        workspace_id: req.workspaceId,
-        source_id: current.id,
-        target_id: target.id,
-        type: body.type,
-      });
-      await recordIssueEvent(db, req, current.id, 'link');
-    }
     broadcast(req);
     res.status(201).json({ ok: true });
   });

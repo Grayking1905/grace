@@ -1,0 +1,304 @@
+/* ============================================================
+   Team Management, Contributions & Project Shared Resources
+   ============================================================ */
+
+/* Team Contributions Panel */
+.team-contributions-section {
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.team-contributions-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-secondary, #f8fafc);
+}
+
+.team-contributions-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-contributions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.team-contributions-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #64748b);
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  background: var(--bg-secondary, #f8fafc);
+}
+
+.team-contributions-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  color: var(--text-primary, #1e293b);
+  vertical-align: middle;
+}
+
+.team-contributions-table tr:last-child td {
+  border-bottom: none;
+}
+
+.team-contributions-table tr:hover td {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+.team-member-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.team-progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.team-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary, #e2e8f0);
+  overflow: hidden;
+}
+
+.team-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #3b82f6;
+  transition: width 0.3s ease;
+}
+
+.team-progress-fill.green {
+  background: #22c55e;
+}
+
+/* Assigned Projects Section in Team Dashboard */
+.team-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.team-project-card {
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  text-decoration: none;
+  color: inherit;
+}
+
+.team-project-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  border-color: var(--primary, #3b82f6);
+}
+
+.team-project-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.team-project-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.team-project-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.team-project-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+/* Project Shared Resources Tab */
+.shared-resources-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 0;
+}
+
+.collaborating-teams-banner {
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.collaborating-teams-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.collaborating-teams-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.team-collab-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+/* Project Documentation Tab */
+.project-docs-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+  padding: 20px 0;
+  min-height: 500px;
+}
+
+.project-docs-sidebar {
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-docs-nav-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 8px;
+}
+
+.project-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+
+.project-doc-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-primary, #0f172a);
+}
+
+.project-doc-item.active {
+  background: var(--primary-subtle, #eff6ff);
+  color: var(--primary, #2563eb);
+  font-weight: 600;
+}
+
+.project-doc-viewer {
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.project-doc-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  padding-bottom: 14px;
+  gap: 12px;
+}
+
+.project-doc-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary, #1e293b);
+  white-space: pre-wrap;
+}
+
+/* Modals */
+.team-member-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.team-member-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.team-member-modal-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.team-member-modal-field select,
+.team-member-modal-field input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--bg-primary, #ffffff);
+  font-size: 13px;
+}
