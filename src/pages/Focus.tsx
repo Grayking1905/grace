@@ -314,61 +314,7 @@ export function FocusWorkList({
     </section>
   );
 }
-export function OrganizationMyWork() {
-  const { data, openWork } = useGrace();
-  const work = useTeamWork(undefined, true);
-  const today = new Date().toLocaleDateString('en-CA');
-  const mine = makeEntries(
-    data.issues.filter((i) => i.assignee_id === data.user.id),
-    work.data?.filter((w) => w.owner_id === data.user.id) || [],
-  ).filter((e) =>
-    e.source === 'issue'
-      ? data.statuses.find((s) => s.id === e.item.status_id)?.category !== 'done'
-      : e.item.state !== 'done',
-  );
-  return (
-    <div className="page focus-page">
-      <div className="page-heading">
-        <div>
-          <h1>My work</h1>
-          <p>Your tasks and project work, together in one place.</p>
-        </div>
-        {canTeamCreate(data.organization, 'daily') && data.user.role !== 'viewer' && (
-          <Button variant="secondary" onClick={() => openWork?.('daily')}>
-            <Plus size={16} />
-            Add daily task
-          </Button>
-        )}
-      </div>
-      <div className="focus-summary">
-        <div>
-          <span className="summary-dot green" />
-          <strong>{mine.length}</strong>
-          <span>Open</span>
-        </div>
-        <div>
-          <span className="summary-dot blue" />
-          <strong>{mine.filter((e) => e.item.due_date === today).length}</strong>
-          <span>Due today</span>
-        </div>
-        <div>
-          <span className="summary-dot amber" />
-          <strong>{mine.filter((e) => e.item.due_date && e.item.due_date < today).length}</strong>
-          <span>Overdue</span>
-        </div>
-      </div>
-      <FocusWorkList
-        issues={data.issues}
-        work={work.data || []}
-        personal
-        loading={work.isPending}
-        error={work.error}
-        retry={() => work.refetch()}
-        title="Your work"
-      />
-    </div>
-  );
-}
+export { OrganizationMyWork } from './MyWork';
 export function TeamsDirectory() {
   const { data } = useGrace();
   const [search, setSearch] = useState('');

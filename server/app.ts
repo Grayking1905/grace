@@ -33,6 +33,7 @@ import {
   recordAuditEvent,
 } from './home-events.js';
 import { registerHomeRoutes } from './features/home.js';
+import { registerInsightsRoutes, registerSandboxRoutes } from './features/insights-sandbox.js';
 import {
   registerOrganizationRoutes,
   employeeIdSchema,
@@ -691,6 +692,8 @@ export async function createApp(
   });
 
   registerSearchRoutes(app, db);
+  registerInsightsRoutes(app, db);
+  registerSandboxRoutes(app, db);
   registerPortfolioRoutes({ app, db, project, visibleProjects, audit, broadcast });
   registerOrganizationRoutes({ app, db, project, issue, visibleProjects, audit, broadcast });
   registerHomeRoutes({

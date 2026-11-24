@@ -38,6 +38,7 @@ import {
 } from './ui';
 import { Editor } from './Editor';
 import { IssuePlanningTools } from './IssueTools';
+import { TargetUrlBanner, parseUrlsFromHtml } from './LinkedUrlsField';
 export function IssueDrawer({ issueId, onClose }: { issueId: string; onClose: () => void }) {
   const { data, run, toast, openIssue, openCreate } = useGrace();
   const detail = useQuery({
@@ -100,6 +101,7 @@ export function IssueDrawer({ issueId, onClose }: { issueId: string; onClose: ()
   const children = data.issues.filter((i) => i.parent_id === current.id);
   const parent = data.issues.find((i) => i.id === current.parent_id);
   const watching = watchers.includes(data.user.id);
+  const targetUrls = parseUrlsFromHtml(current.description).urls;
   const renderValue = (field: string, value: string) => {
     if (!value || value === 'null' || value === '""') return 'none';
     if (field === 'status_id') return data.statuses.find((s) => s.id === value)?.name || value;
@@ -214,6 +216,7 @@ export function IssueDrawer({ issueId, onClose }: { issueId: string; onClose: ()
                 <span>This issue is blocked. A little help could move it forward.</span>
               </div>
             )}
+            {targetUrls.length > 0 && <TargetUrlBanner urls={targetUrls} />}
             <section className="issue-description">
               <div className="detail-section-heading">
                 <h3>Description</h3>

@@ -28,6 +28,18 @@ vi.mock('../lib/api', async (importOriginal) => ({
   patch: vi.fn(),
 }));
 vi.mock('../components/Editor', () => ({ Editor: () => <div>Editor</div> }));
+vi.mock('recharts', () => ({
+  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AreaChart: () => null,
+  Area: () => null,
+  CartesianGrid: () => null,
+  XAxis: () => null,
+  YAxis: () => null,
+  Tooltip: () => null,
+  PieChart: () => null,
+  Pie: () => null,
+  Cell: () => null,
+}));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const team: OrganizationTeam = {
   id: 'frontend',

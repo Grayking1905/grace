@@ -15,6 +15,8 @@ import {
   Settings,
   ShieldCheck,
   CircleHelp,
+  BarChart3,
+  FlaskConical,
 } from 'lucide-react';
 import { useGrace } from '../context';
 export function AppNavigation({ openHelp }: { openHelp: () => void }) {
@@ -48,6 +50,7 @@ export function AppNavigation({ openHelp }: { openHelp: () => void }) {
     { to: '/inbox', label: 'Inbox', icon: Inbox },
   ];
   const unread = data.notifications.filter((n) => !n.read_at).length;
+  const isAdmin = ['owner', 'admin'].includes(data.user.role);
   return (
     <>
       <div className="nav-group simple-primary-nav">
@@ -92,6 +95,18 @@ export function AppNavigation({ openHelp }: { openHelp: () => void }) {
               <span>{n.label}</span>
             </NavLink>
           ))}
+          {isAdmin && (
+            <>
+              <NavLink to="/admin-insights" className="nav-item">
+                <BarChart3 size={16} />
+                <span>Admin insights</span>
+              </NavLink>
+              <NavLink to="/sandbox" className="nav-item">
+                <FlaskConical size={16} />
+                <span>Sandbox</span>
+              </NavLink>
+            </>
+          )}
         </div>
       )}
       <div className="simple-nav-settings">
