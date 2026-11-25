@@ -691,3 +691,40 @@ describe('Strict Project RBAC & Visibility', () => {
     expect((await owner.delete(`/api/v1/projects/${adminOnlyProjId}`).set(csrf)).status).toBe(200);
   });
 });
+
+describe('Legacy Chat Schema Upgrade', () => {
+  it('adds missing chat_messages and chat_channels columns to older databases idempotently', async () => {
+    const legacyDb = new Database('sqlite', ':memory:');
+    await legacyDb.run(
+      'CREATE TABLE chat_channels (id VARCHAR(64) PRIMARY KEY, workspace_id VARCHAR(64) NOT NULL, name VARCHAR(120) NOT NULL, kind VARCHAR(20) NOT NULL, created_by VARCHAR(64) NOT NULL, created_at VARCHAR(32) NOT NULL)',
+    );
+    await legacyDb.run(
+      'CREATE TABLE chat_messages (id VARCHAR(64) PRIMARY KEY, workspace_id VARCHAR(64) NOT NULL, channel_id VARCHAR(64) NOT NULL, sender_id VARCHAR(64) NOT NULL, content TEXT NOT NULL, created_at VARCHAR(32) NOT NULL)',
+    );
+
+    const legacyApp = await createApp({ db: legacyDb, seed: true, mailer: async () => {} });
+    const legacyOwner = request.agent(legacyApp.app);
+    await legacyOwner.post('/api/v1/auth/demo').set(csrf);
+
+    const chRes = await legacyOwner.get('/api/v1/chat/channels');
+    expect(chRes.status).toBe(200);
+    const chId = chRes.body.channels[0].id;
+
+    const msg1 = await legacyOwner
+      .post(`/api/v1/chat/channels/${chId}/messages`)
+      .set(csrf)
+      .send({ content: 'First message after migration' });
+    expect(msg1.status).toBe(201);
+
+    const msg2 = await legacyOwner
+      .post(`/api/v1/chat/channels/${chId}/messages`)
+      .set(csrf)
+      .send({ content: 'Reply after migration', reply_to_id: msg1.body.id });
+    expect(msg2.status).toBe(201);
+    expect(msg2.body.reply_to_id).toBe(msg1.body.id);
+
+    await legacyApp.accounts.flush();
+    legacyApp.io.close();
+    await legacyDb.close();
+  });
+});

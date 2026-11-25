@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -46,18 +46,19 @@ import { api, post, del, patch } from '../lib/api';
 import { useGrace } from '../context';
 import { Avatar, Badge, Button, Modal } from '../components/ui';
 import type { ChatChannel, ChatMessage, ChatChannelKind, ChatAttachment } from '../../shared/types';
-import { useWorkspaceRealtime } from '../lib/useWorkspaceRealtime';
+import { emitRealtimeEvent, useRealtimeEvent } from '../lib/useWorkspaceRealtime';
 
 export function ChatPage() {
   const { channelId } = useParams();
   const navigate = useNavigate();
-  const { data: ctx, openIssue } = useGrace();
+  const { data: ctx, connection, openIssue, toast } = useGrace();
   const qc = useQueryClient();
 
   const [activeChannelId, setActiveChannelId] = useState<string | null>(channelId || null);
   const [inputText, setInputText] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [inChannelSearch, setInChannelSearch] = useState('');
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
 
   // Modals state
   const [createOpen, setCreateOpen] = useState(false);
@@ -92,15 +93,38 @@ export function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevChannelRef = useRef<string | null>(null);
+  const lastTypingSentRef = useRef(0);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const channelsQueryKey = ['chat-channels', ctx?.workspace.id] as const;
 
   // Load channels
   const { data: channelsData } = useQuery<{ channels: ChatChannel[] }>({
-    queryKey: ['chat-channels', ctx?.workspace.id],
+    queryKey: channelsQueryKey,
     queryFn: () => api('/chat/channels'),
-    refetchInterval: 6000,
+    staleTime: 30000,
+    refetchInterval: connection === 'connected' ? false : 15000,
   });
 
   const channels = channelsData?.channels || [];
+
+  const selectChannel = (nextId: string) => {
+    setActiveChannelId(nextId);
+    setTypingUsers({});
+    qc.setQueryData(
+      channelsQueryKey,
+      (old: { channels: ChatChannel[] } | undefined) =>
+        old
+          ? {
+              ...old,
+              channels: old.channels.map((c) =>
+                c.id === nextId ? { ...c, unread_count: 0 } : c,
+              ),
+            }
+          : old,
+    );
+    navigate(`/chat/${nextId}`);
+  };
 
   // Pick first channel if none selected
   useEffect(() => {
@@ -113,8 +137,18 @@ export function ChatPage() {
   useEffect(() => {
     if (channelId && channelId !== activeChannelId) {
       setActiveChannelId(channelId);
+      setTypingUsers({});
     }
-  }, [channelId]);
+  }, [channelId, activeChannelId]);
+
+  useEffect(() => {
+    if (!newTeamId && ctx?.organization?.teams[0]?.id) {
+      setNewTeamId(ctx.organization.teams[0].id);
+    }
+    if (!newProjectId && ctx?.projects[0]?.id) {
+      setNewProjectId(ctx.projects[0].id);
+    }
+  }, [ctx?.organization?.teams, ctx?.projects, newTeamId, newProjectId]);
 
   // Load messages for active channel
   const { data: messagesData, isLoading: loadingMessages } = useQuery<{
@@ -124,82 +158,141 @@ export function ChatPage() {
     queryKey: ['chat-messages', activeChannelId],
     queryFn: () => api(`/chat/channels/${activeChannelId}/messages`),
     enabled: !!activeChannelId,
-    refetchInterval: 3000,
+    staleTime: 30000,
+    refetchInterval: connection === 'connected' ? false : 15000,
   });
 
   const messages = messagesData?.messages || [];
   const currentChannel = messagesData?.channel || channels.find((c) => c.id === activeChannelId);
 
-  // Real-time Socket.IO handler
-  useWorkspaceRealtime(ctx?.user.id, ctx?.workspace.id, {
-    'chat.message': (msg: ChatMessage) => {
-      if (msg.channel_id === activeChannelId) {
-        qc.setQueryData(
-          ['chat-messages', activeChannelId],
-          (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
-            if (!old) return old;
-            if (old.messages.some((m) => m.id === msg.id)) return old;
-            return { ...old, messages: [...old.messages, msg] };
-          },
+  // Real-time event handlers backed by shared Socket.IO connection
+  useRealtimeEvent('chat.message', (msg: ChatMessage) => {
+    if (msg.channel_id === activeChannelId) {
+      setTypingUsers((prev) => {
+        if (!prev[msg.sender_id]) return prev;
+        const next = { ...prev };
+        delete next[msg.sender_id];
+        return next;
+      });
+    }
+
+    qc.setQueryData(
+      ['chat-messages', msg.channel_id],
+      (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
+        if (!old) return old;
+        if (old.messages.some((m) => m.id === msg.id)) return old;
+        const optIdx = old.messages.findIndex(
+          (m) =>
+            m.id.startsWith('opt-') &&
+            m.sender_id === msg.sender_id &&
+            m.content === msg.content,
         );
-      }
-      qc.invalidateQueries({ queryKey: ['chat-channels'] });
-    },
-    'chat.reaction': ({ message_id, emoji, user_id, action }: { message_id: string; emoji: string; user_id: string; action: 'added' | 'removed' }) => {
+        if (optIdx >= 0) {
+          const next = [...old.messages];
+          next[optIdx] = msg;
+          return { ...old, messages: next };
+        }
+        return { ...old, messages: [...old.messages, msg] };
+      },
+    );
+
+    let channelKnown = false;
+    qc.setQueryData(
+      channelsQueryKey,
+      (old: { channels: ChatChannel[] } | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          channels: old.channels.map((c) => {
+            if (c.id !== msg.channel_id) return c;
+            channelKnown = true;
+            const incrementUnread =
+              msg.channel_id !== activeChannelId && msg.sender_id !== ctx?.user.id;
+            return {
+              ...c,
+              unread_count: incrementUnread ? (c.unread_count || 0) + 1 : 0,
+              last_message: {
+                id: msg.id,
+                content: msg.content,
+                sender_name: msg.sender_name || 'Member',
+                created_at: msg.created_at,
+              },
+            };
+          }),
+        };
+      },
+    );
+    if (!channelKnown) {
+      void qc.invalidateQueries({ queryKey: channelsQueryKey });
+    }
+  });
+
+  useRealtimeEvent(
+    'chat.reaction',
+    ({
+      message_id,
+      channel_id,
+      reactions,
+    }: {
+      message_id: string;
+      channel_id?: string;
+      reactions?: Array<{ emoji: string; count: number; users: string[]; has_reacted?: boolean }>;
+    }) => {
+      const targetChannelId = channel_id || activeChannelId;
+      if (!targetChannelId || !reactions) return;
       qc.setQueryData(
-        ['chat-messages', activeChannelId],
+        ['chat-messages', targetChannelId],
         (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
           if (!old) return old;
           return {
             ...old,
-            messages: old.messages.map((m) => {
-              if (m.id !== message_id) return m;
-              const reactions = [...(m.reactions || [])];
-              const existingIdx = reactions.findIndex((r) => r.emoji === emoji);
-              const isSelf = user_id === ctx?.user.id;
-              if (action === 'added') {
-                if (existingIdx >= 0) {
-                  reactions[existingIdx] = {
-                    ...reactions[existingIdx],
-                    count: reactions[existingIdx].count + 1,
-                    has_reacted: isSelf ? true : reactions[existingIdx].has_reacted,
-                  };
-                } else {
-                  reactions.push({ emoji, count: 1, users: [user_id], has_reacted: isSelf });
-                }
-              } else if (existingIdx >= 0) {
-                const nextCount = reactions[existingIdx].count - 1;
-                if (nextCount <= 0) {
-                  reactions.splice(existingIdx, 1);
-                } else {
-                  reactions[existingIdx] = {
-                    ...reactions[existingIdx],
-                    count: nextCount,
-                    has_reacted: isSelf ? false : reactions[existingIdx].has_reacted,
-                  };
-                }
-              }
-              return { ...m, reactions };
-            }),
+            messages: old.messages.map((m) =>
+              m.id === message_id
+                ? {
+                    ...m,
+                    reactions: reactions.map((r) => ({
+                      ...r,
+                      has_reacted: ctx?.user.id ? r.users.includes(ctx.user.id) : false,
+                    })),
+                  }
+                : m,
+            ),
           };
         },
       );
     },
-    'chat.message_updated': (updatedMsg: ChatMessage) => {
+  );
+
+  useRealtimeEvent('chat.message_updated', (updatedMsg: ChatMessage) => {
+    qc.setQueryData(
+      ['chat-messages', updatedMsg.channel_id],
+      (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          messages: old.messages.map((m) =>
+            m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m,
+          ),
+        };
+      },
+    );
+  });
+
+  useRealtimeEvent(
+    'chat.message_pinned',
+    ({
+      message_id,
+      channel_id,
+      pinned,
+    }: {
+      message_id: string;
+      channel_id?: string;
+      pinned: number;
+    }) => {
+      const targetChannelId = channel_id || activeChannelId;
+      if (!targetChannelId) return;
       qc.setQueryData(
-        ['chat-messages', activeChannelId],
-        (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
-          if (!old) return old;
-          return {
-            ...old,
-            messages: old.messages.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m)),
-          };
-        },
-      );
-    },
-    'chat.message_pinned': ({ message_id, pinned }: { message_id: string; pinned: number }) => {
-      qc.setQueryData(
-        ['chat-messages', activeChannelId],
+        ['chat-messages', targetChannelId],
         (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
           if (!old) return old;
           return {
@@ -209,76 +302,293 @@ export function ChatPage() {
         },
       );
     },
-    'chat.message_deleted': ({ message_id }: { message_id: string }) => {
+  );
+
+  useRealtimeEvent(
+    'chat.message_deleted',
+    (payload: { id?: string; message_id?: string; channel_id?: string }) => {
+      const deletedId = payload.id || payload.message_id;
+      const targetChannelId = payload.channel_id || activeChannelId;
+      if (!deletedId || !targetChannelId) return;
       qc.setQueryData(
-        ['chat-messages', activeChannelId],
+        ['chat-messages', targetChannelId],
         (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
           if (!old) return old;
           return {
             ...old,
-            messages: old.messages.filter((m) => m.id !== message_id),
+            messages: old.messages.filter((m) => m.id !== deletedId),
           };
         },
       );
     },
+  );
+
+  useRealtimeEvent('chat.channel_created', (newChannel: ChatChannel) => {
+    qc.setQueryData(
+      channelsQueryKey,
+      (old: { channels: ChatChannel[] } | undefined) => {
+        if (!old || old.channels.some((c) => c.id === newChannel.id)) return old;
+        return { ...old, channels: [...old.channels, newChannel] };
+      },
+    );
   });
 
-  // Auto scroll to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  useRealtimeEvent(
+    'chat.read',
+    ({ channel_id, user_id }: { channel_id: string; user_id: string }) => {
+      if (user_id !== ctx?.user.id) return;
+      qc.setQueryData(
+        channelsQueryKey,
+        (old: { channels: ChatChannel[] } | undefined) =>
+          old
+            ? {
+                ...old,
+                channels: old.channels.map((c) =>
+                  c.id === channel_id ? { ...c, unread_count: 0 } : c,
+                ),
+              }
+            : old,
+      );
+    },
+  );
 
-  // Send message mutation
+  useRealtimeEvent(
+    'chat.typing',
+    (payload: { channel_id: string; user_id: string; user_name: string; is_typing: boolean }) => {
+      if (payload.channel_id !== activeChannelId || payload.user_id === ctx?.user.id) return;
+      setTypingUsers((prev) => {
+        const next = { ...prev };
+        if (payload.is_typing) next[payload.user_id] = payload.user_name;
+        else delete next[payload.user_id];
+        return next;
+      });
+    },
+  );
+
+  // Instant scroll on channel switch, smooth scroll on new messages
+  useEffect(() => {
+    const channelSwitched = prevChannelRef.current !== activeChannelId;
+    prevChannelRef.current = activeChannelId;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: channelSwitched ? 'auto' : 'smooth',
+    });
+  }, [messages.length, activeChannelId]);
+
+  // Send message mutation (optimistic)
   const sendMutation = useMutation({
-    mutationFn: (payload: { content: string; reply_to_id?: string; attachments?: ChatAttachment[] }) =>
-      post<ChatMessage>(`/chat/channels/${activeChannelId}/messages`, payload),
-    onSuccess: (newMsg) => {
+    mutationFn: (payload: {
+      content: string;
+      reply_to_id?: string;
+      attachments?: ChatAttachment[];
+      tempId: string;
+    }) =>
+      post<ChatMessage>(`/chat/channels/${activeChannelId}/messages`, {
+        content: payload.content,
+        reply_to_id: payload.reply_to_id,
+        attachments: payload.attachments,
+      }),
+    onMutate: (payload) => {
+      const targetChannelId = activeChannelId || '';
+      const previousReply = replyingTo;
+      const previousAttachments = pendingAttachments;
       setInputText('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
       setReplyingTo(null);
       setPendingAttachments([]);
+      clearTimeout(typingTimeoutRef.current);
+      if (targetChannelId) {
+        emitRealtimeEvent('chat.typing', { channel_id: targetChannelId, is_typing: false });
+      }
+      const optimistic: ChatMessage = {
+        id: payload.tempId,
+        workspace_id: ctx?.workspace.id || '',
+        channel_id: targetChannelId,
+        sender_id: ctx?.user.id || '',
+        sender_name: ctx?.user.name || 'You',
+        sender_color: ctx?.user.color || '#0f5f44',
+        sender_role: ctx?.user.role || 'member',
+        sender_team_role: ctx?.user.team_role,
+        reply_to_id: payload.reply_to_id || null,
+        reply_to: previousReply
+          ? {
+              id: previousReply.id,
+              sender_name: previousReply.sender_name || 'Member',
+              content: previousReply.content.slice(0, 140),
+            }
+          : null,
+        edited: 0,
+        content: payload.content,
+        attachments: payload.attachments || [],
+        pinned: 0,
+        reactions: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
       qc.setQueryData(
-        ['chat-messages', activeChannelId],
+        ['chat-messages', targetChannelId],
         (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) =>
-          old ? { ...old, messages: [...old.messages, newMsg] } : old,
+          old ? { ...old, messages: [...old.messages, optimistic] } : old,
       );
-      qc.invalidateQueries({ queryKey: ['chat-channels'] });
+      return {
+        tempId: payload.tempId,
+        targetChannelId,
+        content: payload.content,
+        previousReply,
+        previousAttachments,
+      };
+    },
+    onSuccess: (newMsg, _vars, context) => {
+      const targetChannelId = context?.targetChannelId || activeChannelId;
+      qc.setQueryData(
+        ['chat-messages', targetChannelId],
+        (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
+          if (!old) return old;
+          const alreadyExists = old.messages.some((m) => m.id === newMsg.id);
+          return {
+            ...old,
+            messages: alreadyExists
+              ? old.messages.filter((m) => m.id !== context?.tempId)
+              : old.messages.map((m) => (m.id === context?.tempId ? newMsg : m)),
+          };
+        },
+      );
+    },
+    onError: (err, _vars, context) => {
+      if (context) {
+        setInputText(context.content);
+        setReplyingTo(context.previousReply);
+        setPendingAttachments(context.previousAttachments);
+        qc.setQueryData(
+          ['chat-messages', context.targetChannelId],
+          (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) =>
+            old
+              ? { ...old, messages: old.messages.filter((m) => m.id !== context.tempId) }
+              : old,
+        );
+      }
+      toast((err as Error).message || 'Could not send message.', true);
     },
   });
 
-  // Delete message mutation
+  // Delete message mutation (optimistic)
   const deleteMutation = useMutation({
     mutationFn: (msgId: string) => del(`/chat/messages/${msgId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['chat-messages', activeChannelId] });
-      qc.invalidateQueries({ queryKey: ['chat-channels'] });
+    onMutate: (msgId) => {
+      const targetChannelId = activeChannelId;
+      qc.setQueryData(
+        ['chat-messages', targetChannelId],
+        (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) =>
+          old ? { ...old, messages: old.messages.filter((m) => m.id !== msgId) } : old,
+      );
+      return { targetChannelId };
+    },
+    onError: (err, _vars, context) => {
+      void qc.invalidateQueries({ queryKey: ['chat-messages', context?.targetChannelId] });
+      toast((err as Error).message || 'Could not delete message.', true);
     },
   });
 
-  // Edit message mutation
+  // Edit message mutation (optimistic)
   const editMutation = useMutation({
     mutationFn: ({ messageId, content }: { messageId: string; content: string }) =>
       patch<ChatMessage>(`/chat/messages/${messageId}`, { content }),
-    onSuccess: () => {
+    onMutate: ({ messageId, content }) => {
+      const targetChannelId = activeChannelId;
       setEditingMsgId(null);
       setEditingText('');
-      qc.invalidateQueries({ queryKey: ['chat-messages', activeChannelId] });
+      qc.setQueryData(
+        ['chat-messages', targetChannelId],
+        (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) =>
+          old
+            ? {
+                ...old,
+                messages: old.messages.map((m) =>
+                  m.id === messageId ? { ...m, content, edited: 1 } : m,
+                ),
+              }
+            : old,
+      );
+      return { targetChannelId };
+    },
+    onError: (err, _vars, context) => {
+      void qc.invalidateQueries({ queryKey: ['chat-messages', context?.targetChannelId] });
+      toast((err as Error).message || 'Could not edit message.', true);
     },
   });
 
-  // Toggle reaction mutation
+  // Toggle reaction mutation (optimistic)
   const toggleReactionMutation = useMutation({
     mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string }) =>
       post(`/chat/messages/${messageId}/reactions`, { emoji }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['chat-messages', activeChannelId] });
+    onMutate: ({ messageId, emoji }) => {
+      const targetChannelId = activeChannelId;
+      const uid = ctx?.user.id || '';
+      qc.setQueryData(
+        ['chat-messages', targetChannelId],
+        (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            messages: old.messages.map((m) => {
+              if (m.id !== messageId) return m;
+              const reactions = [...(m.reactions || [])];
+              const idx = reactions.findIndex((r) => r.emoji === emoji);
+              if (idx >= 0) {
+                const existing = reactions[idx];
+                if (existing.has_reacted) {
+                  if (existing.count <= 1) reactions.splice(idx, 1);
+                  else {
+                    reactions[idx] = {
+                      ...existing,
+                      count: existing.count - 1,
+                      users: existing.users.filter((u) => u !== uid),
+                      has_reacted: false,
+                    };
+                  }
+                } else {
+                  reactions[idx] = {
+                    ...existing,
+                    count: existing.count + 1,
+                    users: [...existing.users, uid],
+                    has_reacted: true,
+                  };
+                }
+              } else {
+                reactions.push({ emoji, count: 1, users: [uid], has_reacted: true });
+              }
+              return { ...m, reactions };
+            }),
+          };
+        },
+      );
+      return { targetChannelId };
+    },
+    onError: (_err, _vars, context) => {
+      void qc.invalidateQueries({ queryKey: ['chat-messages', context?.targetChannelId] });
     },
   });
 
-  // Toggle pin mutation
+  // Toggle pin mutation (optimistic)
   const pinMutation = useMutation({
     mutationFn: (messageId: string) => post(`/chat/messages/${messageId}/pin`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['chat-messages', activeChannelId] });
+    onMutate: (messageId) => {
+      const targetChannelId = activeChannelId;
+      qc.setQueryData(
+        ['chat-messages', targetChannelId],
+        (old: { channel: ChatChannel; messages: ChatMessage[] } | undefined) =>
+          old
+            ? {
+                ...old,
+                messages: old.messages.map((m) =>
+                  m.id === messageId ? { ...m, pinned: m.pinned ? 0 : 1 } : m,
+                ),
+              }
+            : old,
+      );
+      return { targetChannelId };
+    },
+    onError: (_err, _vars, context) => {
+      void qc.invalidateQueries({ queryKey: ['chat-messages', context?.targetChannelId] });
     },
   });
 
@@ -291,7 +601,7 @@ export function ChatPage() {
     onSuccess: () => {
       setForwardMsg(null);
       setForwardTargetChannelId('');
-      qc.invalidateQueries({ queryKey: ['chat-channels'] });
+      toast('Message forwarded.');
     },
   });
 
@@ -309,9 +619,14 @@ export function ChatPage() {
       setCreateOpen(false);
       setNewName('');
       setNewDesc('');
-      qc.invalidateQueries({ queryKey: ['chat-channels'] });
-      setActiveChannelId(ch.id);
-      navigate(`/chat/${ch.id}`);
+      qc.setQueryData(
+        channelsQueryKey,
+        (old: { channels: ChatChannel[] } | undefined) =>
+          old && !old.channels.some((c) => c.id === ch.id)
+            ? { ...old, channels: [...old.channels, ch] }
+            : old,
+      );
+      selectChannel(ch.id);
     },
   });
 
@@ -322,19 +637,42 @@ export function ChatPage() {
     onSuccess: (ch) => {
       setDmModalOpen(false);
       setDmTargetUserId('');
-      qc.invalidateQueries({ queryKey: ['chat-channels'] });
-      setActiveChannelId(ch.id);
-      navigate(`/chat/${ch.id}`);
+      qc.setQueryData(
+        channelsQueryKey,
+        (old: { channels: ChatChannel[] } | undefined) =>
+          old && !old.channels.some((c) => c.id === ch.id)
+            ? { ...old, channels: [...old.channels, ch] }
+            : old,
+      );
+      selectChannel(ch.id);
     },
   });
 
   const handleSend = () => {
-    if ((!inputText.trim() && pendingAttachments.length === 0) || sendMutation.isPending) return;
+    if (!inputText.trim() && pendingAttachments.length === 0) return;
     sendMutation.mutate({
       content: inputText.trim(),
       reply_to_id: replyingTo ? replyingTo.id : undefined,
       attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
+      tempId: `opt-${Date.now()}-${Math.random()}`,
     });
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
+    if (!activeChannelId) return;
+    const nowTs = Date.now();
+    if (nowTs - lastTypingSentRef.current > 1600 && val.trim()) {
+      lastTypingSentRef.current = nowTs;
+      emitRealtimeEvent('chat.typing', { channel_id: activeChannelId, is_typing: true });
+    }
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      emitRealtimeEvent('chat.typing', { channel_id: activeChannelId, is_typing: false });
+    }, 2000);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -343,6 +681,14 @@ export function ChatPage() {
       handleSend();
     }
   };
+
+  const issueLookup = useMemo(() => {
+    const map = new Map<string, { id: string; key: string; summary: string }>();
+    for (const issue of ctx?.issues || []) map.set(issue.key, issue);
+    return map;
+  }, [ctx?.issues]);
+
+  const typingNames = Object.values(typingUsers);
 
   // Formatting insert helper
   const insertFormatting = (prefix: string, suffix: string = '') => {
@@ -484,7 +830,7 @@ export function ChatPage() {
         );
       }
       // Issue key
-      const matchedIssue = ctx?.issues.find((issue) => issue.key === part);
+      const matchedIssue = issueLookup.get(part);
       if (matchedIssue) {
         return (
           <button
@@ -542,10 +888,7 @@ export function ChatPage() {
                 <button
                   key={c.id}
                   className={`chat-channel-item ${c.id === activeChannelId ? 'active' : ''}`}
-                  onClick={() => {
-                    setActiveChannelId(c.id);
-                    navigate(`/chat/${c.id}`);
-                  }}
+                  onClick={() => selectChannel(c.id)}
                 >
                   <div className="chat-channel-left">
                     <Hash size={15} />
@@ -580,10 +923,7 @@ export function ChatPage() {
                 <button
                   key={c.id}
                   className={`chat-channel-item ${c.id === activeChannelId ? 'active' : ''}`}
-                  onClick={() => {
-                    setActiveChannelId(c.id);
-                    navigate(`/chat/${c.id}`);
-                  }}
+                  onClick={() => selectChannel(c.id)}
                 >
                   <div className="chat-channel-left">
                     <Avatar
@@ -615,10 +955,7 @@ export function ChatPage() {
                   <button
                     key={c.id}
                     className={`chat-channel-item ${c.id === activeChannelId ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveChannelId(c.id);
-                      navigate(`/chat/${c.id}`);
-                    }}
+                    onClick={() => selectChannel(c.id)}
                   >
                     <div className="chat-channel-left">
                       <span
@@ -652,10 +989,7 @@ export function ChatPage() {
                   <button
                     key={c.id}
                     className={`chat-channel-item ${c.id === activeChannelId ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveChannelId(c.id);
-                      navigate(`/chat/${c.id}`);
-                    }}
+                    onClick={() => selectChannel(c.id)}
                   >
                     <div className="chat-channel-left">
                       <FolderKanban size={14} />
@@ -707,6 +1041,13 @@ export function ChatPage() {
               </div>
 
               <div className="chat-header-actions">
+                <span
+                  className={`chat-live-pill ${connection === 'connected' ? 'live' : 'offline'}`}
+                  title={connection === 'connected' ? 'Real-time updates active' : 'Reconnecting…'}
+                >
+                  <i />
+                  {connection === 'connected' ? 'Live' : 'Syncing'}
+                </span>
                 <div className="chat-search-header-box">
                   <Search size={13} style={{ color: 'var(--muted)' }} />
                   <input
@@ -754,12 +1095,13 @@ export function ChatPage() {
               ) : (
                 displayedMessages.map((msg) => {
                   const isSelf = msg.sender_id === ctx?.user.id;
-                  const canDelete = isSelf || ['owner', 'admin'].includes(ctx?.user.role || '');
+                  const isPending = msg.id.startsWith('opt-');
+                  const canDelete = !isPending && (isSelf || ['owner', 'admin'].includes(ctx?.user.role || ''));
 
                   return (
                     <div
                       key={msg.id}
-                      className={`chat-message-row ${msg.pinned ? 'is-pinned' : ''}`}
+                      className={`chat-message-row ${msg.pinned ? 'is-pinned' : ''} ${isPending ? 'is-pending' : ''}`}
                     >
                       <div
                         className="chat-avatar"
@@ -1271,6 +1613,14 @@ export function ChatPage() {
                 </button>
               </div>
 
+              {typingNames.length > 0 && (
+                <div className="chat-typing-indicator">
+                  {typingNames.length === 1
+                    ? `${typingNames[0]} is typing…`
+                    : `${typingNames.join(', ')} are typing…`}
+                </div>
+              )}
+
               {/* Text Input Box */}
               <div className="chat-input-box">
                 <textarea
@@ -1279,16 +1629,13 @@ export function ChatPage() {
                   rows={1}
                   placeholder={`Message ${currentChannel.displayName || '#' + currentChannel.name} (type issue keys like DCP-1 to link)…`}
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
+                  onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
                 />
                 <button
                   className="chat-send-btn"
                   onClick={handleSend}
-                  disabled={
-                    (!inputText.trim() && pendingAttachments.length === 0) ||
-                    sendMutation.isPending
-                  }
+                  disabled={!inputText.trim() && pendingAttachments.length === 0}
                   title="Send message (Enter)"
                 >
                   <Send size={15} />

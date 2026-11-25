@@ -34,7 +34,7 @@ export class Database {
       if (path !== ':memory:') mkdirSync(dirname(resolve(path)), { recursive: true });
       this.sqlite = new DatabaseSync(path);
       this.sqlite.exec(
-        'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;',
+        'PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -16000; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;',
       );
     }
   }
@@ -127,11 +127,70 @@ export class Database {
     if (callbacks) callbacks.push(task);
     else this.context.exit(task);
   }
+  private async ensureMissingColumns() {
+    const columnMigrations: Array<[string, string, string]> = [
+      ['chat_channels', 'team_id', 'VARCHAR(64)'],
+      ['chat_channels', 'project_id', 'VARCHAR(64)'],
+      ['chat_channels', 'description', 'TEXT'],
+      ['chat_channels', 'updated_at', 'VARCHAR(32)'],
+      ['chat_messages', 'reply_to_id', 'VARCHAR(64)'],
+      ['chat_messages', 'forwarded_from', 'VARCHAR(100)'],
+      ['chat_messages', 'edited', 'INTEGER NOT NULL DEFAULT 0'],
+      ['chat_messages', 'attachments', 'TEXT'],
+      ['chat_messages', 'pinned', 'INTEGER NOT NULL DEFAULT 0'],
+      ['chat_messages', 'updated_at', 'VARCHAR(32)'],
+      ['projects', 'visibility', "VARCHAR(20) NOT NULL DEFAULT 'workspace'"],
+      ['projects', 'favorite', 'INTEGER NOT NULL DEFAULT 0'],
+      ['projects', 'next_number', 'INTEGER NOT NULL DEFAULT 1'],
+      ['projects', 'archived_at', 'VARCHAR(32)'],
+      ['issues', 'start_date', 'VARCHAR(32)'],
+      ['issues', 'flagged', 'INTEGER NOT NULL DEFAULT 0'],
+      ['issues', 'carry_over', 'INTEGER NOT NULL DEFAULT 0'],
+      ['issues', 'version', 'INTEGER NOT NULL DEFAULT 1'],
+      ['issues', 'deleted_at', 'VARCHAR(32)'],
+      ['comments', 'edited_at', 'VARCHAR(32)'],
+      ['statuses', 'wip_limit', 'INTEGER NOT NULL DEFAULT 0'],
+      ['sprints', 'committed_points', 'INTEGER NOT NULL DEFAULT 0'],
+      ['sprints', 'completed_points', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+
+    const tableCols = new Map<string, Set<string>>();
+    const uniqueTables = [...new Set(columnMigrations.map(([table]) => table))];
+    for (const table of uniqueTables) {
+      if (this.driver === 'sqlite') {
+        const rows = await this.all<{ name: string }>(`PRAGMA table_info(${table})`);
+        tableCols.set(table, new Set(rows.map((r) => r.name)));
+      } else {
+        const rows = await this.all<{ COLUMN_NAME: string }>(
+          'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+          [table],
+        );
+        tableCols.set(table, new Set(rows.map((r) => r.COLUMN_NAME)));
+      }
+    }
+
+    for (const [table, column, definition] of columnMigrations) {
+      if (!tableCols.get(table)?.has(column)) {
+        await this.run(`ALTER TABLE ${table} ADD COLUMN \`${column}\` ${definition}`);
+        tableCols.get(table)?.add(column);
+      }
+    }
+
+    await this.run("UPDATE chat_messages SET attachments = '[]' WHERE attachments IS NULL");
+    await this.run(
+      'UPDATE chat_messages SET updated_at = created_at WHERE updated_at IS NULL',
+    );
+    await this.run("UPDATE chat_channels SET description = '' WHERE description IS NULL");
+    await this.run(
+      'UPDATE chat_channels SET updated_at = created_at WHERE updated_at IS NULL',
+    );
+  }
   async migrate() {
     for (const [name, columns] of Object.entries(tables))
       await this.run(
         `CREATE TABLE IF NOT EXISTS ${name} (${columns})${this.driver === 'mysql' ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : ''}`,
       );
+    await this.ensureMissingColumns();
     for (const [name, table, columns] of indexes) {
       try {
         await this.run(
