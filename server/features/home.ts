@@ -330,6 +330,22 @@ export function registerHomeRoutes({
           : null,
     });
   });
+  app.get('/api/v1/projects/:id/teams', async (req, res) => {
+    const projectId = String(req.params.id);
+    await project(req, projectId, false);
+    const assignments = await db.all<{ team_id: string }>(
+      'SELECT team_id FROM project_team_assignments WHERE project_id=? AND workspace_id=?',
+      [projectId, req.workspaceId],
+    );
+    const setting = await db.one<{ version: number }>(
+      'SELECT version FROM project_team_settings WHERE project_id=? AND workspace_id=?',
+      [projectId, req.workspaceId],
+    );
+    res.json({
+      team_ids: assignments.map((a) => a.team_id),
+      version: setting?.version || 0,
+    });
+  });
   app.put('/api/v1/projects/:id/teams', async (req, res) => {
     canAdmin(req);
     const projectId = String(req.params.id);
@@ -339,7 +355,7 @@ export function registerHomeRoutes({
           .array(z.string().min(1).max(64))
           .max(100)
           .transform((v) => [...new Set(v)]),
-        version: z.number().int().min(0),
+        version: z.number().int().min(0).optional(),
       })
       .strict()
       .parse(req.body);
@@ -356,7 +372,7 @@ export function registerHomeRoutes({
         'SELECT version FROM project_team_settings WHERE project_id=? AND workspace_id=?',
         [projectId, req.workspaceId],
       );
-      if ((previous?.version || 0) !== body.version)
+      if (body.version !== undefined && (previous?.version || 0) !== body.version)
         throw new HttpError(
           409,
           'Project team assignments changed. Refresh before saving.',
@@ -386,6 +402,6 @@ export function registerHomeRoutes({
       await audit(req, 'project.teams.assigned', projectId);
     });
     broadcast(req);
-    res.json({ team_ids: body.team_ids, version: body.version + 1 });
+    res.json({ team_ids: body.team_ids, version: (body.version ?? 0) + 1 });
   });
 }

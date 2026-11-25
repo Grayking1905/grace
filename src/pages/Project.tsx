@@ -52,6 +52,9 @@ import {
   Clock3,
   CircleDashed,
   Star,
+  BookOpen,
+  Share2,
+  MessageSquare,
 } from 'lucide-react';
 import type { Bootstrap, Issue, Project, Sprint, Status } from '../../shared/types';
 import { useGrace } from '../context';
@@ -75,6 +78,11 @@ import { ProjectModules, ProjectCycles } from './Planning';
 import { ProjectAdministration } from './Administration';
 import { BacklogRankControls } from '../components/IssueTools';
 import { CopyButton } from '../components/CopyButton';
+import {
+  ProjectDocsView,
+  ProjectSharedResourcesView,
+  ProjectChatView,
+} from '../components/ProjectResources';
 
 export function ProjectPage() {
   const { projectId, view = 'board' } = useParams();
@@ -106,6 +114,9 @@ export function ProjectPage() {
     { id: 'cycles', label: 'Cycles', icon: CircleDashed },
     { id: 'modules', label: 'Modules', icon: Layers },
     { id: 'roadmap', label: 'Roadmap', icon: CalendarRange },
+    { id: 'docs', label: 'Docs', icon: BookOpen },
+    { id: 'resources', label: 'Resources', icon: Share2 },
+    { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: Settings2 },
   ];
   return (
@@ -157,6 +168,12 @@ export function ProjectPage() {
         <Backlog project={project} />
       ) : view === 'roadmap' ? (
         <Roadmap project={project} />
+      ) : view === 'docs' ? (
+        <ProjectDocsView project={project} />
+      ) : view === 'resources' ? (
+        <ProjectSharedResourcesView project={project} />
+      ) : view === 'chat' ? (
+        <ProjectChatView project={project} />
       ) : (
         <ProjectOverview project={project} />
       )}

@@ -160,10 +160,10 @@ export function registerOrganizationRoutes({
   const admin = (req: Request) => ['owner', 'admin'].includes(req.user.role);
   function manageTeam(req: Request) {
     canWrite(req);
-    if (!admin(req) && req.user.team_role !== 'manager')
+    if (!admin(req) && !['manager', 'lead'].includes(req.user.team_role || ''))
       throw new HttpError(
         403,
-        'A team manager or organization administrator must make this change.',
+        'A team manager, team lead, or organization administrator must make this change.',
       );
   }
   const context = (req: Request) =>
@@ -315,6 +315,137 @@ export function registerOrganizationRoutes({
     });
     broadcast(req);
     res.json({ ok: true });
+  });
+  app.post('/api/v1/organization/teams/:id/members', async (req, res) => {
+    manageTeam(req);
+    const teamId = String(req.params.id);
+    const wid = req.workspaceId;
+    if (!admin(req) && req.user.team_id !== teamId) {
+      throw new HttpError(403, 'You can only add members to your own team.');
+    }
+    const body = z
+      .object({
+        user_id: z.string().min(1),
+        team_role: z.enum(['lead', 'member', 'viewer']).default('member'),
+      })
+      .parse(req.body);
+
+    await requireActiveMember(db, wid, body.user_id, 404);
+    await team(req, teamId);
+
+    const existing = await db.one<{ user_id: string; employee_id: string; version: number }>(
+      'SELECT user_id, employee_id, version FROM employee_profiles WHERE workspace_id=? AND user_id=?',
+      [wid, body.user_id],
+    );
+
+    if (existing) {
+      await db.run(
+        'UPDATE employee_profiles SET team_id=?, team_role=?, version=version+1 WHERE workspace_id=? AND user_id=?',
+        [teamId, body.team_role, wid, body.user_id],
+      );
+    } else {
+      let empId = `EMP-${id().slice(0, 6).toUpperCase()}`;
+      await db.insert('employee_profiles', {
+        workspace_id: wid,
+        user_id: body.user_id,
+        employee_id: empId,
+        team_id: teamId,
+        team_role: body.team_role,
+        version: 1,
+      });
+    }
+
+    await audit(req, 'team.member.added', teamId, body.user_id);
+    broadcast(req);
+    res.status(201).json({ ok: true });
+  });
+  app.delete('/api/v1/organization/teams/:id/members/:userId', async (req, res) => {
+    manageTeam(req);
+    const teamId = String(req.params.id);
+    const userId = String(req.params.userId);
+    const wid = req.workspaceId;
+
+    if (!admin(req) && req.user.team_id !== teamId) {
+      throw new HttpError(403, 'You can only manage members of your own team.');
+    }
+
+    await db.run(
+      'DELETE FROM employee_profiles WHERE workspace_id=? AND user_id=? AND team_id=?',
+      [wid, userId, teamId],
+    );
+
+    await audit(req, 'team.member.removed', teamId, userId);
+    broadcast(req);
+    res.json({ ok: true });
+  });
+  app.get('/api/v1/organization/teams/:id/contributions', async (req, res) => {
+    const teamId = String(req.params.id);
+    const wid = req.workspaceId;
+
+    const currentTeam = await db.one<{ id: string; name: string; color: string }>(
+      'SELECT id, name, color FROM organization_teams WHERE workspace_id=? AND id=?',
+      [wid, teamId],
+    );
+    if (!currentTeam) throw new HttpError(404, 'Team not found');
+
+    const employees = await db.all<{
+      user_id: string;
+      name: string;
+      email: string;
+      color: string;
+      team_role: string;
+    }>(
+      `SELECT e.user_id, u.name, u.email, u.color, e.team_role
+       FROM employee_profiles e
+       JOIN users u ON u.id = e.user_id
+       WHERE e.workspace_id = ? AND e.team_id = ?
+       ORDER BY u.name`,
+      [wid, teamId],
+    );
+
+    const contributions = await Promise.all(
+      employees.map(async (emp) => {
+        const issues = await db.all<{ status_id: string; story_points: number }>(
+          `SELECT i.status_id, i.story_points
+           FROM issues i
+           WHERE i.workspace_id = ? AND i.deleted_at IS NULL AND i.assignee_id = ?`,
+          [wid, emp.user_id],
+        );
+        const doneStatuses = await db.all<{ id: string }>(
+          'SELECT id FROM statuses WHERE workspace_id = ? AND category = ?',
+          [wid, 'done'],
+        );
+        const doneIds = new Set(doneStatuses.map((s) => s.id));
+        const completed = issues.filter((i) => doneIds.has(i.status_id));
+        const points = completed.reduce((sum, i) => sum + (i.story_points || 0), 0);
+
+        const work = await db.all<{ kind: string; state: string }>(
+          'SELECT kind, state FROM organization_work WHERE workspace_id = ? AND owner_id = ?',
+          [wid, emp.user_id],
+        );
+
+        return {
+          user_id: emp.user_id,
+          name: emp.name,
+          email: emp.email,
+          color: emp.color,
+          team_role: emp.team_role,
+          assigned_issues: issues.length,
+          completed_issues: completed.length,
+          story_points: points,
+          daily_tasks_count: work.filter((w) => w.kind === 'daily').length,
+          brds_count: work.filter((w) => w.kind === 'brd').length,
+          completion_rate: issues.length > 0 ? Math.round((completed.length / issues.length) * 100) : 0,
+        };
+      }),
+    );
+
+    res.json({
+      team: currentTeam,
+      members: contributions,
+      total_completed_issues: contributions.reduce((s, m) => s + m.completed_issues, 0),
+      total_story_points: contributions.reduce((s, m) => s + m.story_points, 0),
+    });
   });
   app.patch('/api/v1/organization/teams/:id/layout', async (req, res) => {
     manageTeam(req);

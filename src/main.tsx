@@ -11,6 +11,9 @@ import './simplified.css';
 import './sidebar.css';
 import './my-work.css';
 import './insights-sandbox.css';
+import './dependency-capacity.css';
+import './chat.css';
+import './team-resources.css';
 const client = new QueryClient({
   defaultOptions: {
     queries: { retry: false, refetchOnWindowFocus: true, staleTime: 15000 },

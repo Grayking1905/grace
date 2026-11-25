@@ -408,6 +408,73 @@ CREATE TABLE IF NOT EXISTS sandbox_apps (
   FOREIGN KEY(sandbox_id) REFERENCES sandboxes(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS sprint_capacity (
+  sprint_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  workspace_id VARCHAR(64) NOT NULL,
+  available_hours INTEGER NOT NULL DEFAULT 40,
+  focus_factor REAL NOT NULL DEFAULT 0.7,
+  committed_points INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(sprint_id,user_id),
+  FOREIGN KEY(sprint_id) REFERENCES sprints(id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS chat_channels (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  kind VARCHAR(20) NOT NULL,
+  team_id VARCHAR(64),
+  project_id VARCHAR(64),
+  description TEXT NOT NULL,
+  created_by VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  channel_id VARCHAR(64) NOT NULL,
+  sender_id VARCHAR(64) NOT NULL,
+  content TEXT NOT NULL,
+  attachments TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(channel_id) REFERENCES chat_channels(id),
+  FOREIGN KEY(sender_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS chat_reads (
+  workspace_id VARCHAR(64) NOT NULL,
+  channel_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  last_read_at VARCHAR(32) NOT NULL,
+  PRIMARY KEY(channel_id,user_id),
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(channel_id) REFERENCES chat_channels(id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS project_documents (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  project_id VARCHAR(64) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  content TEXT NOT NULL,
+  category VARCHAR(50) NOT NULL DEFAULT 'guide',
+  author_id VARCHAR(64) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(project_id) REFERENCES projects(id),
+  FOREIGN KEY(author_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS module_members (
   module_id VARCHAR(64) NOT NULL,
   user_id VARCHAR(64) NOT NULL,
@@ -676,3 +743,10 @@ CREATE INDEX home_events_cursor ON home_events (workspace_id,created_at,id);
 CREATE INDEX home_events_team ON home_events (workspace_id,team_id,created_at);
 CREATE INDEX home_events_actor ON home_events (workspace_id,actor_id,action,created_at);
 CREATE INDEX project_teams_team ON project_team_assignments (workspace_id,team_id,project_id);
+CREATE INDEX sprint_capacity_sprint ON sprint_capacity (workspace_id,sprint_id);
+CREATE INDEX issue_links_source ON issue_links (workspace_id,source_id);
+CREATE INDEX issue_links_target ON issue_links (workspace_id,target_id);
+CREATE INDEX chat_messages_channel ON chat_messages (workspace_id,channel_id,created_at);
+CREATE INDEX chat_channels_team ON chat_channels (workspace_id,team_id);
+CREATE INDEX chat_channels_project ON chat_channels (workspace_id,project_id);
+CREATE INDEX project_docs_project ON project_documents (workspace_id,project_id);

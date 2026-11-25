@@ -38,6 +38,7 @@ export interface Project {
   issue_types?: IssueType[];
   default_type?: IssueType;
   cycles_enabled?: boolean;
+  team_ids?: string[];
 }
 export interface Status {
   id: string;
@@ -182,6 +183,40 @@ export interface Attachment {
   mime: string;
   created_at: string;
 }
+export type LinkType =
+  | 'blocks'
+  | 'is-blocked-by'
+  | 'duplicates'
+  | 'is-duplicated-by'
+  | 'relates-to'
+  | 'causes'
+  | 'is-caused-by';
+
+export interface IssueLink {
+  id: string;
+  source_id: string;
+  target_id: string;
+  type: LinkType;
+  source_key?: string;
+  source_summary?: string;
+  target_key?: string;
+  target_summary?: string;
+  target_status?: string;
+  target_priority?: string;
+}
+
+export interface SprintCapacity {
+  sprint_id: string;
+  user_id: string;
+  workspace_id: string;
+  available_hours: number;
+  focus_factor: number;
+  committed_points: number;
+  user_name: string;
+  user_color: string;
+  assigned_points: number;
+}
+
 export interface IssueDetail {
   issue: Issue;
   comments: Comment[];
@@ -196,4 +231,70 @@ export interface IssueDetail {
     summary: string;
   }[];
   watchers: string[];
+}
+
+export type ChatChannelKind = 'team' | 'project' | 'direct' | 'general' | 'topic';
+
+export interface ChatChannel {
+  id: string;
+  workspace_id: string;
+  name: string;
+  kind: ChatChannelKind;
+  team_id?: string | null;
+  project_id?: string | null;
+  description: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  unread_count?: number;
+  last_message?: {
+    id: string;
+    content: string;
+    sender_name: string;
+    created_at: string;
+  } | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  workspace_id: string;
+  channel_id: string;
+  sender_id: string;
+  sender_name?: string;
+  sender_color?: string;
+  sender_role?: string;
+  sender_team_role?: string;
+  content: string;
+  attachments: string[];
+  pinned: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDocument {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  title: string;
+  content: string;
+  category: 'guide' | 'api' | 'architecture' | 'notes';
+  is_public?: boolean;
+  author_id: string;
+  author_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamMemberContribution {
+  user_id: string;
+  name: string;
+  email: string;
+  color: string;
+  team_role: string;
+  assigned_issues: number;
+  completed_issues: number;
+  story_points: number;
+  daily_tasks_count: number;
+  brds_count: number;
+  completion_rate: number;
 }

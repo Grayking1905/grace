@@ -17,6 +17,9 @@ import {
   CircleHelp,
   BarChart3,
   FlaskConical,
+  GitBranch,
+  Gauge,
+  MessageSquare,
 } from 'lucide-react';
 import { useGrace } from '../context';
 export function AppNavigation({ openHelp }: { openHelp: () => void }) {
@@ -67,6 +70,10 @@ export function AppNavigation({ openHelp }: { openHelp: () => void }) {
           </NavLink>
         ))}
       </div>
+      <NavLink to="/chat" className="nav-item">
+        <MessageSquare size={18} />
+        <span>Chat</span>
+      </NavLink>
       <NavLink to="/reports" className="nav-item">
         <ChartNoAxesCombined size={18} />
         <span>Reports</span>
@@ -104,6 +111,10 @@ export function AppNavigation({ openHelp }: { openHelp: () => void }) {
               <NavLink to="/sandbox" className="nav-item">
                 <FlaskConical size={16} />
                 <span>Sandbox</span>
+              </NavLink>
+              <NavLink to="/capacity" className="nav-item">
+                <Gauge size={16} />
+                <span>Capacity planning</span>
               </NavLink>
             </>
           )}

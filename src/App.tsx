@@ -96,6 +96,13 @@ const AdminInsightsPage = lazy(() =>
 const SandboxPage = lazy(() =>
   import('./pages/Sandbox').then((m) => ({ default: m.SandboxPage })),
 );
+const DependencyGraphPage = lazy(() =>
+  import('./pages/DependencyGraph').then((m) => ({ default: m.DependencyGraphPage })),
+);
+const CapacityPlanningPage = lazy(() =>
+  import('./pages/CapacityPlanning').then((m) => ({ default: m.CapacityPlanningPage })),
+);
+const ChatPage = lazy(() => import('./pages/Chat').then((m) => ({ default: m.ChatPage })));
 
 type Toast = {
   id: number;
@@ -278,6 +285,8 @@ export default function App() {
             <Route path="/invite" element={<InvitationAccept />} />
             <Route path="/my-work" element={<MyWork />} />
             <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/:channelId" element={<ChatPage />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId/:view?" element={<ProjectPage />} />
             <Route path="/pages/:pageId?" element={<PagesPage />} />
@@ -289,6 +298,8 @@ export default function App() {
             <Route path="/administration" element={<AdministrationPage />} />
             <Route path="/admin-insights" element={<AdminInsightsPage />} />
             <Route path="/sandbox" element={<SandboxPage />} />
+            <Route path="/capacity" element={<CapacityPlanningPage />} />
+            <Route path="/dependency-graph/:projectId" element={<DependencyGraphPage />} />
             <Route path="/security" element={<AccountSecurityPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/portfolio" element={<PortfolioPage />} />
@@ -408,6 +419,7 @@ function Shell({
       '/administration': 'Administration',
       '/admin-insights': 'Admin insights',
       '/sandbox': 'Sandbox',
+      '/capacity': 'Capacity planning',
       '/security': 'Account security',
       '/templates': 'Issue templates',
       '/portfolio': 'Portfolio',
