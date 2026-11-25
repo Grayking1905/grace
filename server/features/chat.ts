@@ -134,6 +134,33 @@ async function fetchEnrichedMessage(
   };
 }
 
+async function markChannelRead(
+  db: Database,
+  workspaceId: string,
+  channelId: string,
+  userId: string,
+  timestamp = now(),
+) {
+  const existing = await db.one(
+    'SELECT user_id FROM chat_reads WHERE channel_id = ? AND user_id = ?',
+    [channelId, userId],
+  );
+  if (existing) {
+    await db.run(
+      'UPDATE chat_reads SET last_read_at = ? WHERE channel_id = ? AND user_id = ?',
+      [timestamp, channelId, userId],
+    );
+  } else {
+    await db.insert('chat_reads', {
+      workspace_id: workspaceId,
+      channel_id: channelId,
+      user_id: userId,
+      last_read_at: timestamp,
+    });
+  }
+  return timestamp;
+}
+
 export function registerChatRoutes(
   app: Express,
   db: Database,
@@ -164,13 +191,23 @@ export function registerChatRoutes(
   }
   // Helper to ensure initial default channels exist
   async function ensureDefaultChannels(workspaceId: string, userId: string) {
-    const existing = await db.all<{ id: string; kind: string; team_id: string | null; project_id: string | null }>(
-      'SELECT id, kind, team_id, project_id FROM chat_channels WHERE workspace_id = ?',
-      [workspaceId],
-    );
+    const [existing, teams, projects] = await Promise.all([
+      db.all<{ id: string; kind: string; team_id: string | null; project_id: string | null }>(
+        'SELECT id, kind, team_id, project_id FROM chat_channels WHERE workspace_id = ?',
+        [workspaceId],
+      ),
+      db.all<{ id: string; name: string }>(
+        'SELECT id, name FROM organization_teams WHERE workspace_id = ?',
+        [workspaceId],
+      ),
+      db.all<{ id: string; key: string; name: string }>(
+        'SELECT id, `key`, name FROM projects WHERE workspace_id = ? AND archived_at IS NULL',
+        [workspaceId],
+      ),
+    ]);
 
-    const hasGeneral = existing.some((c) => c.kind === 'general');
-    if (!hasGeneral) {
+    const ts = now();
+    if (!existing.some((c) => c.kind === 'general')) {
       await db.insert('chat_channels', {
         id: id(),
         workspace_id: workspaceId,
@@ -180,16 +217,11 @@ export function registerChatRoutes(
         project_id: null,
         description: 'General discussion for all workspace members',
         created_by: userId,
-        created_at: now(),
-        updated_at: now(),
+        created_at: ts,
+        updated_at: ts,
       });
     }
 
-    // Ensure channels for existing teams
-    const teams = await db.all<{ id: string; name: string }>(
-      'SELECT id, name FROM organization_teams WHERE workspace_id = ?',
-      [workspaceId],
-    );
     for (const t of teams) {
       if (!existing.some((c) => c.kind === 'team' && c.team_id === t.id)) {
         await db.insert('chat_channels', {
@@ -201,17 +233,12 @@ export function registerChatRoutes(
           project_id: null,
           description: `Dedicated chat for ${t.name}`,
           created_by: userId,
-          created_at: now(),
-          updated_at: now(),
+          created_at: ts,
+          updated_at: ts,
         });
       }
     }
 
-    // Ensure channels for active projects
-    const projects = await db.all<{ id: string; key: string; name: string }>(
-      'SELECT id, `key`, name FROM projects WHERE workspace_id = ? AND archived_at IS NULL',
-      [workspaceId],
-    );
     for (const p of projects) {
       if (!existing.some((c) => c.kind === 'project' && c.project_id === p.id)) {
         await db.insert('chat_channels', {
@@ -223,14 +250,14 @@ export function registerChatRoutes(
           project_id: p.id,
           description: `Collaboration room for project ${p.name} (${p.key})`,
           created_by: userId,
-          created_at: now(),
-          updated_at: now(),
+          created_at: ts,
+          updated_at: ts,
         });
       }
     }
   }
 
-  // GET /api/v1/chat/channels — list accessible channels with unread counts
+  // GET /api/v1/chat/channels — list accessible channels with batched unread counts & previews
   app.get('/api/v1/chat/channels', async (req: Request, res: Response) => {
     if (!req.user) throw new HttpError(401, 'Not authenticated');
     const wid = req.workspaceId;
@@ -238,65 +265,82 @@ export function registerChatRoutes(
 
     await ensureDefaultChannels(wid, uid);
 
-    const allChannels = await db.all<ChatChannel>(
-      `SELECT c.* FROM chat_channels c WHERE c.workspace_id = ? ORDER BY c.kind, c.name`,
-      [wid],
-    );
+    const [allChannels, visibleProjectIds, workspaceUsers, unreadRows, latestMsgs] =
+      await Promise.all([
+        db.all<ChatChannel>(
+          `SELECT c.* FROM chat_channels c WHERE c.workspace_id = ? ORDER BY c.kind, c.name`,
+          [wid],
+        ),
+        getVisibleProjectIds(req),
+        db.all<{ id: string; name: string; color: string; email: string }>(
+          'SELECT u.id, u.name, u.color, u.email FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.workspace_id = ?',
+          [wid],
+        ),
+        db.all<{ channel_id: string; count: number }>(
+          `SELECT m.channel_id, COUNT(*) AS count
+           FROM chat_messages m
+           LEFT JOIN chat_reads r ON r.channel_id = m.channel_id AND r.user_id = ? AND r.workspace_id = m.workspace_id
+           WHERE m.workspace_id = ? AND m.sender_id != ? AND m.created_at > COALESCE(r.last_read_at, '2000-01-01T00:00:00Z')
+           GROUP BY m.channel_id`,
+          [uid, wid, uid],
+        ),
+        db.all<{
+          channel_id: string;
+          id: string;
+          content: string;
+          sender_name: string;
+          created_at: string;
+        }>(
+          `SELECT m.channel_id, m.id, m.content, u.name AS sender_name, m.created_at
+           FROM chat_messages m
+           JOIN users u ON u.id = m.sender_id
+           JOIN (
+             SELECT channel_id, MAX(created_at) AS max_created_at
+             FROM chat_messages
+             WHERE workspace_id = ?
+             GROUP BY channel_id
+           ) latest ON latest.channel_id = m.channel_id AND m.created_at = latest.max_created_at
+           WHERE m.workspace_id = ?`,
+          [wid, wid],
+        ),
+      ]);
 
-    // Filter direct, team, and project channels to authorized scopes
-    const visibleProjectIds = await getVisibleProjectIds(req);
     const accessibleChannels = allChannels.filter((c) =>
       canAccessChannel(req, c, visibleProjectIds),
     );
 
-    // Get read times for current user
-    const reads = await db.all<{ channel_id: string; last_read_at: string }>(
-      'SELECT channel_id, last_read_at FROM chat_reads WHERE workspace_id = ? AND user_id = ?',
-      [wid, uid],
-    );
-    const readMap = new Map(reads.map((r) => [r.channel_id, r.last_read_at]));
-
-    // All workspace users for resolving direct message names
-    const workspaceUsers = await db.all<{ id: string; name: string; color: string; email: string }>(
-      'SELECT id, name, color, email FROM users',
-    );
     const userMap = new Map(workspaceUsers.map((u) => [u.id, u]));
+    const unreadMap = new Map(unreadRows.map((r) => [r.channel_id, Number(r.count || 0)]));
+    const lastMsgMap = new Map<
+      string,
+      { id: string; content: string; sender_name: string; created_at: string }
+    >();
+    for (const msg of latestMsgs) {
+      if (!lastMsgMap.has(msg.channel_id)) {
+        lastMsgMap.set(msg.channel_id, {
+          id: msg.id,
+          content: msg.content,
+          sender_name: msg.sender_name,
+          created_at: msg.created_at,
+        });
+      }
+    }
 
-    // Get unread counts and last messages
-    const enriched = await Promise.all(
-      accessibleChannels.map(async (c) => {
-        const lastRead = readMap.get(c.id) || '2000-01-01T00:00:00Z';
-        const unreadRow = await db.one<{ count: number }>(
-          'SELECT COUNT(*) AS count FROM chat_messages WHERE channel_id = ? AND created_at > ? AND sender_id != ?',
-          [c.id, lastRead, uid],
-        );
-        const lastMsg = await db.one<{ id: string; content: string; sender_name: string; created_at: string }>(
-          `SELECT m.id, m.content, u.name AS sender_name, m.created_at
-           FROM chat_messages m
-           JOIN users u ON u.id = m.sender_id
-           WHERE m.channel_id = ?
-           ORDER BY m.created_at DESC LIMIT 1`,
-          [c.id],
-        );
-
-        let displayName = c.name;
-        if (c.kind === 'direct') {
-          const parts = c.name.replace('dm-', '').split('-');
-          const otherId = parts.find((p) => p !== uid) || parts[0];
-          const otherUser = userMap.get(otherId);
-          if (otherUser) {
-            displayName = otherUser.name;
-          }
-        }
-
-        return {
-          ...c,
-          name: displayName,
-          unread_count: unreadRow?.count ?? 0,
-          last_message: lastMsg || null,
-        };
-      }),
-    );
+    const enriched = accessibleChannels.map((c) => {
+      let displayName = c.name;
+      if (c.kind === 'direct') {
+        const parts = c.name.replace('dm-', '').split('-');
+        const otherId = parts.find((p) => p !== uid) || parts[0];
+        const otherUser = userMap.get(otherId);
+        if (otherUser) displayName = otherUser.name;
+      }
+      return {
+        ...c,
+        name: displayName,
+        unread_count: unreadMap.get(c.id) ?? 0,
+        last_message: lastMsgMap.get(c.id) || null,
+      };
+    });
 
     res.json({ channels: enriched });
   });
@@ -343,7 +387,6 @@ export function registerChatRoutes(
     );
 
     if (io) io.to(`workspace:${wid}`).emit('chat.channel_created', channel);
-    if (broadcast) broadcast(req);
 
     res.status(201).json(channel);
   });
@@ -440,14 +483,17 @@ export function registerChatRoutes(
     const channelId = String(req.params.channelId);
     const wid = req.workspaceId;
 
-    const channel = await db.one<ChatChannel>(
-      'SELECT * FROM chat_channels WHERE id = ? AND workspace_id = ?',
-      [channelId, wid],
-    );
-    if (!channel || !canAccessChannel(req, channel, await getVisibleProjectIds(req)))
+    const [channel, visibleProjectIds] = await Promise.all([
+      db.one<ChatChannel>(
+        'SELECT * FROM chat_channels WHERE id = ? AND workspace_id = ?',
+        [channelId, wid],
+      ),
+      getVisibleProjectIds(req),
+    ]);
+    if (!channel || !canAccessChannel(req, channel, visibleProjectIds))
       throw new HttpError(404, 'Channel not found');
 
-    const rows = await db.all<{
+    const descRows = await db.all<{
       id: string;
       workspace_id: string;
       channel_id: string;
@@ -472,21 +518,36 @@ export function registerChatRoutes(
        JOIN memberships mem ON mem.user_id = u.id AND mem.workspace_id = m.workspace_id
        LEFT JOIN employee_profiles ep ON ep.user_id = u.id AND ep.workspace_id = m.workspace_id
        WHERE m.channel_id = ? AND m.workspace_id = ?
-       ORDER BY m.created_at ASC LIMIT 300`,
+       ORDER BY m.created_at DESC LIMIT 200`,
       [channelId, wid],
     );
+    const rows = descRows.reverse();
 
-    // Fetch reactions for these messages
     const msgIds = rows.map((r) => r.id);
+    const replyIds = [...new Set(rows.map((r) => r.reply_to_id).filter(Boolean) as string[])];
+
+    const [rxRows, replyRows] = await Promise.all([
+      msgIds.length > 0
+        ? db.all<{ message_id: string; emoji: string; user_id: string }>(
+            `SELECT message_id, emoji, user_id FROM chat_reactions
+             WHERE workspace_id = ? AND message_id IN (${msgIds.map(() => '?').join(',')})`,
+            [wid, ...msgIds],
+          )
+        : Promise.resolve([]),
+      replyIds.length > 0
+        ? db.all<{ id: string; content: string; sender_name: string }>(
+            `SELECT m.id, m.content, u.name AS sender_name
+             FROM chat_messages m
+             JOIN users u ON u.id = m.sender_id
+             WHERE m.workspace_id = ? AND m.id IN (${replyIds.map(() => '?').join(',')})`,
+            [wid, ...replyIds],
+          )
+        : Promise.resolve([]),
+      markChannelRead(db, wid, channelId, req.user.id),
+    ]);
+
     const reactionsMap = new Map<string, ChatReaction[]>();
-
-    if (msgIds.length > 0) {
-      const rxRows = await db.all<{ message_id: string; emoji: string; user_id: string }>(
-        `SELECT message_id, emoji, user_id FROM chat_reactions
-         WHERE workspace_id = ? AND message_id IN (${msgIds.map(() => '?').join(',')})`,
-        [wid, ...msgIds],
-      );
-
+    if (rxRows.length > 0) {
       const grouped = new Map<string, Map<string, string[]>>();
       for (const rx of rxRows) {
         if (!grouped.has(rx.message_id)) grouped.set(rx.message_id, new Map());
@@ -510,24 +571,13 @@ export function registerChatRoutes(
       }
     }
 
-    // Resolve reply_to messages
-    const replyIds = rows.map((r) => r.reply_to_id).filter(Boolean) as string[];
     const replyMap = new Map<string, { id: string; sender_name: string; content: string }>();
-    if (replyIds.length > 0) {
-      const replyRows = await db.all<{ id: string; content: string; sender_name: string }>(
-        `SELECT m.id, m.content, u.name AS sender_name
-         FROM chat_messages m
-         JOIN users u ON u.id = m.sender_id
-         WHERE m.workspace_id = ? AND m.id IN (${replyIds.map(() => '?').join(',')})`,
-        [wid, ...replyIds],
-      );
-      for (const rp of replyRows) {
-        replyMap.set(rp.id, {
-          id: rp.id,
-          sender_name: rp.sender_name,
-          content: rp.content.slice(0, 140),
-        });
-      }
+    for (const rp of replyRows) {
+      replyMap.set(rp.id, {
+        id: rp.id,
+        sender_name: rp.sender_name,
+        content: rp.content.slice(0, 140),
+      });
     }
 
     const messages: ChatMessage[] = rows.map((r) => {
@@ -560,25 +610,6 @@ export function registerChatRoutes(
       };
     });
 
-    // Auto mark as read
-    const existingRead = await db.one(
-      'SELECT user_id FROM chat_reads WHERE channel_id = ? AND user_id = ?',
-      [channelId, req.user.id],
-    );
-    if (existingRead) {
-      await db.run(
-        'UPDATE chat_reads SET last_read_at = ? WHERE channel_id = ? AND user_id = ?',
-        [now(), channelId, req.user.id],
-      );
-    } else {
-      await db.insert('chat_reads', {
-        workspace_id: wid,
-        channel_id: channelId,
-        user_id: req.user.id,
-        last_read_at: now(),
-      });
-    }
-
     res.json({ channel, messages });
   });
 
@@ -589,11 +620,14 @@ export function registerChatRoutes(
     const wid = req.workspaceId;
     const body = postMessageSchema.parse(req.body);
 
-    const channel = await db.one<ChatChannel>(
-      'SELECT * FROM chat_channels WHERE id = ? AND workspace_id = ?',
-      [channelId, wid],
-    );
-    if (!channel || !canAccessChannel(req, channel, await getVisibleProjectIds(req)))
+    const [channel, visibleProjectIds] = await Promise.all([
+      db.one<ChatChannel>(
+        'SELECT * FROM chat_channels WHERE id = ? AND workspace_id = ?',
+        [channelId, wid],
+      ),
+      getVisibleProjectIds(req),
+    ]);
+    if (!channel || !canAccessChannel(req, channel, visibleProjectIds))
       throw new HttpError(404, 'Channel not found');
 
     const msgId = id();
@@ -613,31 +647,12 @@ export function registerChatRoutes(
       updated_at: timestamp,
     });
 
-    // Update read state for sender
-    const readExists = await db.one(
-      'SELECT user_id FROM chat_reads WHERE channel_id = ? AND user_id = ?',
-      [channelId, req.user.id],
-    );
-    if (readExists) {
-      await db.run(
-        'UPDATE chat_reads SET last_read_at = ? WHERE channel_id = ? AND user_id = ?',
-        [timestamp, channelId, req.user.id],
-      );
-    } else {
-      await db.insert('chat_reads', {
-        workspace_id: wid,
-        channel_id: channelId,
-        user_id: req.user.id,
-        last_read_at: timestamp,
-      });
-    }
-
+    await markChannelRead(db, wid, channelId, req.user.id, timestamp);
     const message = await fetchEnrichedMessage(db, msgId, wid, req.user.id);
 
     if (io && message) {
       io.to(`workspace:${wid}`).emit('chat.message', message);
     }
-    if (broadcast) broadcast(req);
 
     res.status(201).json(message);
   });
@@ -666,7 +681,6 @@ export function registerChatRoutes(
 
     const updated = await fetchEnrichedMessage(db, messageId, wid, req.user.id);
     if (io && updated) io.to(`workspace:${wid}`).emit('chat.message_updated', updated);
-    if (broadcast) broadcast(req);
 
     res.json(updated);
   });
@@ -696,7 +710,6 @@ export function registerChatRoutes(
         pinned: newPinned,
       });
     }
-    if (broadcast) broadcast(req);
 
     res.json({ ok: true, pinned: newPinned });
   });
@@ -761,13 +774,15 @@ export function registerChatRoutes(
     );
     if (!original) throw new HttpError(404, 'Original message not found');
 
-    const origSender = await db.one<{ name: string }>('SELECT name FROM users WHERE id = ?', [original.sender_id]);
-
-    const targetChannel = await db.one<ChatChannel>(
-      'SELECT * FROM chat_channels WHERE id = ? AND workspace_id = ?',
-      [body.target_channel_id, wid],
-    );
-    if (!targetChannel || !canAccessChannel(req, targetChannel, await getVisibleProjectIds(req)))
+    const [origSender, targetChannel, visibleProjectIds] = await Promise.all([
+      db.one<{ name: string }>('SELECT name FROM users WHERE id = ?', [original.sender_id]),
+      db.one<ChatChannel>('SELECT * FROM chat_channels WHERE id = ? AND workspace_id = ?', [
+        body.target_channel_id,
+        wid,
+      ]),
+      getVisibleProjectIds(req),
+    ]);
+    if (!targetChannel || !canAccessChannel(req, targetChannel, visibleProjectIds))
       throw new HttpError(404, 'Target channel not found');
 
     const newMsgId = id();
@@ -789,7 +804,6 @@ export function registerChatRoutes(
 
     const msg = await fetchEnrichedMessage(db, newMsgId, wid, req.user.id);
     if (io && msg) io.to(`workspace:${wid}`).emit('chat.message', msg);
-    if (broadcast) broadcast(req);
 
     res.status(201).json(msg);
   });
@@ -798,27 +812,14 @@ export function registerChatRoutes(
   app.post('/api/v1/chat/channels/:channelId/read', async (req: Request, res: Response) => {
     if (!req.user) throw new HttpError(401, 'Not authenticated');
     const channelId = String(req.params.channelId);
-    const wid = req.workspaceId;
-    const timestamp = now();
-
-    const readExists = await db.one(
-      'SELECT user_id FROM chat_reads WHERE channel_id = ? AND user_id = ?',
-      [channelId, req.user.id],
-    );
-    if (readExists) {
-      await db.run(
-        'UPDATE chat_reads SET last_read_at = ? WHERE channel_id = ? AND user_id = ?',
-        [timestamp, channelId, req.user.id],
-      );
-    } else {
-      await db.insert('chat_reads', {
-        workspace_id: wid,
+    const timestamp = await markChannelRead(db, req.workspaceId, channelId, req.user.id);
+    if (io) {
+      io.to(`workspace:${req.workspaceId}`).emit('chat.read', {
         channel_id: channelId,
         user_id: req.user.id,
         last_read_at: timestamp,
       });
     }
-
     res.json({ ok: true });
   });
 
@@ -839,14 +840,19 @@ export function registerChatRoutes(
       throw new HttpError(403, 'You can only delete your own messages');
     }
 
-    // Also delete any reactions for this message
-    await db.run('DELETE FROM chat_reactions WHERE message_id = ? AND workspace_id = ?', [messageId, wid]);
+    await db.run('DELETE FROM chat_reactions WHERE message_id = ? AND workspace_id = ?', [
+      messageId,
+      wid,
+    ]);
     await db.run('DELETE FROM chat_messages WHERE id = ? AND workspace_id = ?', [messageId, wid]);
 
     if (io) {
-      io.to(`workspace:${wid}`).emit('chat.message_deleted', { id: messageId, channel_id: message.channel_id });
+      io.to(`workspace:${wid}`).emit('chat.message_deleted', {
+        id: messageId,
+        message_id: messageId,
+        channel_id: message.channel_id,
+      });
     }
-    if (broadcast) broadcast(req);
 
     res.json({ ok: true });
   });

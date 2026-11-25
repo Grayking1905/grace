@@ -1894,6 +1894,17 @@ export async function createApp(
   io.on('connection', (socket) => {
     socket.join(`workspace:${socket.data.workspaceId}`);
     io.to(`workspace:${socket.data.workspaceId}`).emit('presence.updated');
+    socket.on('chat.typing', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const channelId = (payload as { channel_id?: unknown }).channel_id;
+      if (typeof channelId !== 'string' || !channelId) return;
+      socket.to(`workspace:${socket.data.workspaceId}`).emit('chat.typing', {
+        channel_id: channelId,
+        user_id: socket.data.user.id,
+        user_name: socket.data.user.name,
+        is_typing: Boolean((payload as { is_typing?: unknown }).is_typing),
+      });
+    });
     // Revalidate session and membership periodically; revoked sessions lose updates.
     const timer = setInterval(async () => {
       const active = await db

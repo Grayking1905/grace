@@ -24,7 +24,12 @@ if (typeof localStorage !== 'undefined') {
 
 const client = new QueryClient({
   defaultOptions: {
-    queries: { retry: false, refetchOnWindowFocus: true, staleTime: 15000 },
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+      staleTime: 60000,
+      gcTime: 600000,
+    },
   },
 });
 ReactDOM.createRoot(document.getElementById('root')!).render(
