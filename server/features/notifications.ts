@@ -16,7 +16,7 @@ export async function audienceMember(
   userId: string,
 ) {
   return !!(await db.one(
-    `SELECT m.user_id FROM memberships m JOIN projects p ON p.workspace_id=m.workspace_id WHERE m.workspace_id=? AND p.id=? AND m.user_id=? AND ${activeMembership()} AND (p.visibility='workspace' OR m.role IN ('owner','admin') OR p.lead_id=m.user_id OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=m.user_id AND pm.workspace_id=m.workspace_id))`,
+    `SELECT m.user_id FROM memberships m JOIN projects p ON p.workspace_id=m.workspace_id WHERE m.workspace_id=? AND p.id=? AND m.user_id=? AND ${activeMembership()} AND (m.role IN ('owner','admin') OR p.lead_id=m.user_id OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=m.user_id AND pm.workspace_id=m.workspace_id) OR (p.visibility<>'private' AND EXISTS (SELECT 1 FROM employee_profiles ep JOIN project_team_assignments pta ON pta.team_id=ep.team_id AND pta.workspace_id=ep.workspace_id WHERE ep.workspace_id=m.workspace_id AND ep.user_id=m.user_id AND ep.team_role IN ('lead','manager') AND pta.project_id=p.id)))`,
     [workspaceId, projectId, userId],
   ));
 }

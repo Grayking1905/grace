@@ -20,9 +20,9 @@ import { useGrace } from '../context';
 import { canTeamCreate, teamRoleLabels, type TeamRole } from '../../shared/organization';
 import { Avatar, Badge, Button, Empty, Modal } from '../components/ui';
 import { FocusWorkList, useTeamWork } from './Focus';
-import { api, post, del } from '../lib/api';
+import { api, post, put, del } from '../lib/api';
 import { ChatWidget } from '../components/ChatWidget';
-import type { TeamMemberContribution } from '../../shared/types';
+import type { TeamMemberContribution, TeamMemberProjectAllocation } from '../../shared/types';
 
 export function TeamDashboard() {
   const { teamId } = useParams();
@@ -36,6 +36,12 @@ export function TeamDashboard() {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedRole, setSelectedRole] = useState<'lead' | 'member' | 'viewer'>('member');
+
+  // Member project allocation state
+  const [assignProjectsMember, setAssignProjectsMember] = useState<TeamMemberProjectAllocation | null>(null);
+  const [assignMembersProject, setAssignMembersProject] = useState<{ id: string; name: string; key: string } | null>(null);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [selectedMemberUserIds, setSelectedMemberUserIds] = useState<string[]>([]);
 
   const team = data.organization?.teams.find((t) => t.id === teamId);
   if (!team)
@@ -126,6 +132,42 @@ export function TeamDashboard() {
     onSuccess: async () => {
       await refresh();
       qc.invalidateQueries({ queryKey: ['team-contributions', team.id] });
+    },
+  });
+
+  // Query member project allocations
+  const { data: memberProjectsData, refetch: refetchMemberProjects } = useQuery<{
+    projects: Array<{ id: string; name: string; key: string; color: string; description: string }>;
+    members: Array<TeamMemberProjectAllocation>;
+  }>({
+    queryKey: ['team-member-projects', team.id],
+    queryFn: () => api(`/organization/teams/${team.id}/member-projects`),
+    enabled: Boolean(canManageMembers),
+  });
+
+  // Assign member projects mutation
+  const assignMemberProjectsMutation = useMutation({
+    mutationFn: () =>
+      put(`/organization/teams/${team.id}/members/${assignProjectsMember?.user_id}/projects`, {
+        project_ids: selectedProjectIds,
+      }),
+    onSuccess: async () => {
+      setAssignProjectsMember(null);
+      await refetchMemberProjects();
+      await refresh();
+    },
+  });
+
+  // Assign project members mutation
+  const assignProjectMembersMutation = useMutation({
+    mutationFn: () =>
+      put(`/organization/teams/${team.id}/projects/${assignMembersProject?.id}/members`, {
+        user_ids: selectedMemberUserIds,
+      }),
+    onSuccess: async () => {
+      setAssignMembersProject(null);
+      await refetchMemberProjects();
+      await refresh();
     },
   });
 
@@ -283,49 +325,101 @@ export function TeamDashboard() {
                 <Badge>{people.length}</Badge>
               </header>
               {people.length ? (
-                people.map((person) => (
-                  <div className="team-person" key={person.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <Avatar user={person} size={32} />
-                      <span>
-                        <strong>{person.name}</strong>
-                        <small style={{ display: 'block', color: 'var(--text-muted, #64748b)' }}>
-                          {teamRoleLabels[person.team_role || 'member']}
-                        </small>
-                      </span>
-                    </div>
-                    {canManageMembers && person.id !== data.user.id && (
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <select
-                          style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--border, #e2e8f0)' }}
-                          value={person.team_role || 'member'}
-                          onChange={(e) => updateRoleMutation.mutate({ userId: person.id, role: e.target.value })}
-                        >
-                          <option value="lead">Lead</option>
-                          <option value="member">Member</option>
-                          <option value="viewer">Viewer</option>
-                        </select>
-                        <button
-                          title="Remove from team"
-                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 2 }}
-                          onClick={() => removeMemberMutation.mutate(person.id)}
-                        >
-                          <UserMinus size={13} />
-                        </button>
+                people.map((person) => {
+                  const alloc = memberProjectsData?.members?.find((m) => m.user_id === person.id);
+                  const memberProjects = (alloc?.project_ids || [])
+                    .map((pid) => (memberProjectsData?.projects || assignedProjects).find((p) => p.id === pid))
+                    .filter(Boolean);
+
+                  return (
+                    <div className="team-person" key={person.id}>
+                      <div className="focus-team-member-top">
+                        <div className="focus-team-member-info">
+                          <Avatar user={person} size={34} />
+                          <div className="focus-team-member-meta">
+                            <strong title={person.name}>{person.name}</strong>
+                            <small>{teamRoleLabels[person.team_role || 'member']}</small>
+                          </div>
+                        </div>
+                        {canManageMembers && person.id !== data.user.id && (
+                          <div className="focus-team-member-controls">
+                            <select
+                              aria-label={`Team role for ${person.name}`}
+                              value={person.team_role || 'member'}
+                              onChange={(e) => updateRoleMutation.mutate({ userId: person.id, role: e.target.value })}
+                            >
+                              <option value="lead">Lead</option>
+                              <option value="member">Member</option>
+                              <option value="viewer">Viewer</option>
+                            </select>
+                            <button
+                              type="button"
+                              className="focus-team-remove-btn"
+                              aria-label={`Remove ${person.name} from team`}
+                              title="Remove from team"
+                              onClick={() => removeMemberMutation.mutate(person.id)}
+                            >
+                              <UserMinus size={14} />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))
+
+                      {canManageMembers && (
+                        <div className="focus-team-member-projects">
+                          <div className="focus-team-project-pills">
+                            <span className="focus-team-projects-label">Projects:</span>
+                            {memberProjects.length === 0 ? (
+                              <span className="focus-team-projects-empty">None allocated</span>
+                            ) : (
+                              memberProjects.map((p) => (
+                                <span
+                                  key={p!.id}
+                                  className="focus-team-project-chip"
+                                  style={{ background: p!.color || '#e2e8f0' }}
+                                >
+                                  {p!.key}
+                                </span>
+                              ))
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn secondary focus-team-projects-btn"
+                            title="Allocate to specific projects"
+                            onClick={() => {
+                              setAssignProjectsMember(
+                                alloc || {
+                                  user_id: person.id,
+                                  name: person.name,
+                                  email: person.email,
+                                  color: person.color,
+                                  team_role: person.team_role || 'member',
+                                  project_ids: [],
+                                },
+                              );
+                              setSelectedProjectIds(alloc?.project_ids || []);
+                            }}
+                          >
+                            <FolderKanban size={12} />
+                            Projects
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               ) : (
                 <p>No employees are assigned to this team yet.</p>
               )}
               {canManageMembers && (
                 <button
-                  className="btn secondary"
-                  style={{ width: '100%', marginTop: 8, fontSize: 12 }}
+                  type="button"
+                  className="btn secondary focus-team-add-member-btn"
                   onClick={() => setAddMemberOpen(true)}
                 >
-                  <UserPlus size={13} />
+                  <UserPlus size={14} />
                   Add Member to Team
                 </button>
               )}
@@ -359,29 +453,87 @@ export function TeamDashboard() {
                     .map((tid) => data.organization?.teams.find((t) => t.id === tid))
                     .filter(Boolean);
 
+                  const allocatedMembers = (memberProjectsData?.members || []).filter((m) =>
+                    m.project_ids.includes(proj.id),
+                  );
+
                   return (
-                    <Link key={proj.id} to={`/projects/${proj.id}`} className="team-project-card">
-                      <div className="team-project-card-header">
-                        <span className="team-project-card-title">
-                          <span className="team-project-badge-dot" style={{ background: proj.color }} />
-                          {proj.name}
-                        </span>
-                        <Badge tone="neutral">{proj.key}</Badge>
-                      </div>
-                      <p style={{ fontSize: 12, color: 'var(--text-muted, #64748b)', margin: 0, lineClamp: 2, overflow: 'hidden' }}>
-                        {proj.description || 'No description provided.'}
-                      </p>
+                    <div key={proj.id} className="team-project-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                       <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                          <span>Team Progress</span>
-                          <strong>{pct}% ({doneCount}/{projIssues.length})</strong>
+                        <div className="team-project-card-header">
+                          <Link to={`/projects/${proj.id}`} className="team-project-card-title">
+                            <span className="team-project-badge-dot" style={{ background: proj.color }} />
+                            {proj.name}
+                          </Link>
+                          <Badge tone="neutral">{proj.key}</Badge>
                         </div>
-                        <div className="team-progress-track">
-                          <div className={`team-progress-fill ${pct === 100 ? 'green' : ''}`} style={{ width: `${pct}%` }} />
+                        <p style={{ fontSize: 12, color: 'var(--text-muted, #64748b)', margin: '4px 0 8px 0', lineClamp: 2, overflow: 'hidden' }}>
+                          {proj.description || 'No description provided.'}
+                        </p>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                            <span>Team Progress</span>
+                            <strong>{pct}% ({doneCount}/{projIssues.length})</strong>
+                          </div>
+                          <div className="team-progress-track">
+                            <div className={`team-progress-fill ${pct === 100 ? 'green' : ''}`} style={{ width: `${pct}%` }} />
+                          </div>
                         </div>
+
+                        {/* Allocated Team Members */}
+                        {canManageMembers && (
+                          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+                                Allocated Members ({allocatedMembers.length})
+                              </span>
+                              <button
+                                type="button"
+                                className="btn secondary focus-team-projects-btn"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setAssignMembersProject({ id: proj.id, name: proj.name, key: proj.key });
+                                  setSelectedMemberUserIds(allocatedMembers.map((m) => m.user_id));
+                                }}
+                              >
+                                <Users size={12} />
+                                Allocate
+                              </button>
+                            </div>
+                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+                              {allocatedMembers.length === 0 ? (
+                                <span style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                                  No team members allocated yet
+                                </span>
+                              ) : (
+                                allocatedMembers.map((m) => (
+                                  <span
+                                    key={m.user_id}
+                                    title={`${m.name} (${m.email})`}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 5,
+                                      fontSize: 12,
+                                      padding: '2px 8px',
+                                      borderRadius: 14,
+                                      background: 'var(--sage)',
+                                      color: 'var(--text)',
+                                      fontWeight: 500,
+                                    }}
+                                  >
+                                    <Avatar user={{ name: m.name, color: m.color }} size={16} />
+                                    <span>{m.name.split(' ')[0]}</span>
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
+
                       {otherTeams.length > 0 && (
-                        <div style={{ fontSize: 11, color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                           <span>Shared with:</span>
                           {otherTeams.map((ot) => (
                             <span
@@ -399,7 +551,7 @@ export function TeamDashboard() {
                           ))}
                         </div>
                       )}
-                    </Link>
+                    </div>
                   );
                 })}
               </div>
@@ -524,6 +676,147 @@ export function TeamDashboard() {
             >
               Add Member
             </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Allocate Member to Projects Modal */}
+      {assignProjectsMember && (
+        <Modal
+          title={`Allocate ${assignProjectsMember.name} to Projects`}
+          onClose={() => setAssignProjectsMember(null)}
+        >
+          <div className="team-member-modal-form">
+            <p style={{ fontSize: 13, color: 'var(--text-muted, #64748b)', margin: 0 }}>
+              Select which projects this team member should be assigned to work on.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto', marginTop: 10 }}>
+              {(memberProjectsData?.projects || assignedProjects).length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--text-muted, #64748b)' }}>No projects are assigned to this team yet.</p>
+              ) : (
+                (memberProjectsData?.projects || assignedProjects).map((p) => {
+                  const checked = selectedProjectIds.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border, #e2e8f0)',
+                        background: checked ? 'var(--sage, #edf2e9)' : 'transparent',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedProjectIds((prev) => [...prev, p.id]);
+                          } else {
+                            setSelectedProjectIds((prev) => prev.filter((id) => id !== p.id));
+                          }
+                        }}
+                      />
+                      <span
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: '50%',
+                          background: p.color || '#3b82f6',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ fontWeight: 600, flex: 1, fontSize: 13 }}>{p.name}</span>
+                      <Badge tone="neutral">{p.key}</Badge>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <Button variant="secondary" onClick={() => setAssignProjectsMember(null)}>
+                Cancel
+              </Button>
+              <Button
+                busy={assignMemberProjectsMutation.isPending}
+                onClick={() => assignMemberProjectsMutation.mutate()}
+              >
+                Save Allocations
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Allocate Team Members to Project Modal */}
+      {assignMembersProject && (
+        <Modal
+          title={`Allocate Team Members: ${assignMembersProject.name}`}
+          onClose={() => setAssignMembersProject(null)}
+        >
+          <div className="team-member-modal-form">
+            <p style={{ fontSize: 13, color: 'var(--text-muted, #64748b)', margin: 0 }}>
+              Select which members of {team.name} should be allocated to work on {assignMembersProject.name} ({assignMembersProject.key}).
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto', marginTop: 10 }}>
+              {people.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--text-muted, #64748b)' }}>No members in this team.</p>
+              ) : (
+                people.map((person) => {
+                  const checked = selectedMemberUserIds.includes(person.id);
+                  return (
+                    <label
+                      key={person.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border, #e2e8f0)',
+                        background: checked ? 'var(--sage, #edf2e9)' : 'transparent',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedMemberUserIds((prev) => [...prev, person.id]);
+                          } else {
+                            setSelectedMemberUserIds((prev) => prev.filter((id) => id !== person.id));
+                          }
+                        }}
+                      />
+                      <Avatar user={person} size={26} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{person.name}</div>
+                        <small style={{ color: 'var(--text-muted, #64748b)' }}>{person.email}</small>
+                      </div>
+                      <Badge tone="neutral">{teamRoleLabels[person.team_role || 'member']}</Badge>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <Button variant="secondary" onClick={() => setAssignMembersProject(null)}>
+                Cancel
+              </Button>
+              <Button
+                busy={assignProjectMembersMutation.isPending}
+                onClick={() => assignProjectMembersMutation.mutate()}
+              >
+                Save Allocations
+              </Button>
+            </div>
           </div>
         </Modal>
       )}

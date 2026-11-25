@@ -238,6 +238,89 @@ export function registerOrganizationRoutes({
     broadcast(req);
     res.json(await team(req, teamId));
   });
+  app.delete('/api/v1/organization/teams/:id', async (req, res) => {
+    canAdmin(req);
+    const teamId = String(req.params.id);
+    const targetTeam = await team(req, teamId);
+    const archivedProjects: string[] = [];
+
+    await db.transaction(async () => {
+      // 1. Identify all projects assigned to this team
+      const assigned = await db.all<{ project_id: string }>(
+        'SELECT project_id FROM project_team_assignments WHERE team_id = ? AND workspace_id = ?',
+        [teamId, req.workspaceId],
+      );
+
+      // 2. If a project is assigned ONLY to this team and no other team, archive it (do not delete it)
+      for (const row of assigned) {
+        const others = await db.one<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM project_team_assignments WHERE project_id = ? AND team_id != ? AND workspace_id = ?',
+          [row.project_id, teamId, req.workspaceId],
+        );
+        if ((others?.count ?? 0) === 0) {
+          await db.run(
+            'UPDATE projects SET archived_at = ? WHERE id = ? AND workspace_id = ? AND archived_at IS NULL',
+            [now(), row.project_id, req.workspaceId],
+          );
+          archivedProjects.push(row.project_id);
+        }
+      }
+
+      // 3. Remove team project assignments
+      await db.run('DELETE FROM project_team_assignments WHERE team_id = ? AND workspace_id = ?', [
+        teamId,
+        req.workspaceId,
+      ]);
+
+      // 4. Remove employee profiles and invites for this team
+      await db.run('DELETE FROM employee_profiles WHERE team_id = ? AND workspace_id = ?', [
+        teamId,
+        req.workspaceId,
+      ]);
+      await db.run('DELETE FROM employee_invites WHERE team_id = ? AND workspace_id = ?', [
+        teamId,
+        req.workspaceId,
+      ]);
+
+      // 5. Remove organization work for this team
+      const workRows = await db.all<{ id: string }>(
+        'SELECT id FROM organization_work WHERE team_id = ? AND workspace_id = ?',
+        [teamId, req.workspaceId],
+      );
+      for (const w of workRows) {
+        await db.run('DELETE FROM organization_work_issues WHERE work_id = ?', [w.id]);
+      }
+      await db.run('DELETE FROM organization_work WHERE team_id = ? AND workspace_id = ?', [
+        teamId,
+        req.workspaceId,
+      ]);
+
+      // 6. Remove chat channels for this team
+      const channels = await db.all<{ id: string }>(
+        'SELECT id FROM chat_channels WHERE team_id = ? AND workspace_id = ?',
+        [teamId, req.workspaceId],
+      );
+      for (const c of channels) {
+        await db.run('DELETE FROM chat_messages WHERE channel_id = ?', [c.id]);
+        await db.run('DELETE FROM chat_reads WHERE channel_id = ?', [c.id]);
+      }
+      await db.run('DELETE FROM chat_channels WHERE team_id = ? AND workspace_id = ?', [
+        teamId,
+        req.workspaceId,
+      ]);
+
+      // 7. Delete team itself
+      await db.run('DELETE FROM organization_teams WHERE id = ? AND workspace_id = ?', [
+        teamId,
+        req.workspaceId,
+      ]);
+
+      await audit(req, 'team.deleted', teamId, targetTeam.name);
+    });
+
+    broadcast(req);
+    res.json({ ok: true, archived_projects: archivedProjects });
+  });
   app.get('/api/v1/organization/employees', async (req, res) => {
     manageTeam(req);
     res.json(
@@ -369,14 +452,249 @@ export function registerOrganizationRoutes({
       throw new HttpError(403, 'You can only manage members of your own team.');
     }
 
-    await db.run(
-      'DELETE FROM employee_profiles WHERE workspace_id=? AND user_id=? AND team_id=?',
-      [wid, userId, teamId],
-    );
+    await db.transaction(async () => {
+      const assignedPrjs = await db.all<{ project_id: string }>(
+        'SELECT project_id FROM project_team_assignments WHERE workspace_id=? AND team_id=?',
+        [wid, teamId],
+      );
+      for (const ap of assignedPrjs) {
+        const prj = await db.one<{ lead_id: string }>('SELECT lead_id FROM projects WHERE id=?', [
+          ap.project_id,
+        ]);
+        if (prj && prj.lead_id !== userId) {
+          const memberRow = await db.one<{ role: string }>(
+            'SELECT role FROM memberships WHERE workspace_id=? AND user_id=?',
+            [wid, userId],
+          );
+          if (memberRow && !['owner', 'admin'].includes(memberRow.role)) {
+            await db.run(
+              'DELETE FROM project_members WHERE workspace_id=? AND project_id=? AND user_id=?',
+              [wid, ap.project_id, userId],
+            );
+          }
+        }
+      }
+      await db.run(
+        'DELETE FROM employee_profiles WHERE workspace_id=? AND user_id=? AND team_id=?',
+        [wid, userId, teamId],
+      );
+    });
 
     await audit(req, 'team.member.removed', teamId, userId);
     broadcast(req);
     res.json({ ok: true });
+  });
+
+  // GET /api/v1/organization/teams/:id/member-projects — team members and their project assignments
+  app.get('/api/v1/organization/teams/:id/member-projects', async (req, res) => {
+    manageTeam(req);
+    const teamId = String(req.params.id);
+    const wid = req.workspaceId;
+    if (!admin(req) && req.user.team_id !== teamId) {
+      throw new HttpError(403, 'You can only view your own team assignments.');
+    }
+
+    const currentTeam = await team(req, teamId);
+
+    // Projects assigned to this team
+    const projects = await db.all<{ id: string; name: string; key: string; color: string; description: string }>(
+      `SELECT p.id, p.name, p.key, p.color, p.description
+       FROM project_team_assignments pta
+       JOIN projects p ON p.id = pta.project_id
+       WHERE pta.workspace_id = ? AND pta.team_id = ? AND p.archived_at IS NULL
+       ORDER BY p.name`,
+      [wid, teamId],
+    );
+
+    // Team members
+    const members = await db.all<{
+      user_id: string;
+      name: string;
+      email: string;
+      color: string;
+      team_role: string;
+    }>(
+      `SELECT e.user_id, u.name, u.email, u.color, e.team_role
+       FROM employee_profiles e
+       JOIN users u ON u.id = e.user_id
+       WHERE e.workspace_id = ? AND e.team_id = ?
+       ORDER BY u.name`,
+      [wid, teamId],
+    );
+
+    // Project memberships for these team members on these projects
+    const prjIds = projects.map((p) => p.id);
+    const memberAssignments: Record<string, string[]> = {};
+    for (const m of members) {
+      memberAssignments[m.user_id] = [];
+    }
+
+    if (prjIds.length > 0 && members.length > 0) {
+      const pmRows = await db.all<{ project_id: string; user_id: string }>(
+        `SELECT project_id, user_id FROM project_members
+         WHERE workspace_id = ? AND project_id IN (${prjIds.map(() => '?').join(',')})`,
+        [wid, ...prjIds],
+      );
+      for (const row of pmRows) {
+        if (memberAssignments[row.user_id]) {
+          memberAssignments[row.user_id].push(row.project_id);
+        }
+      }
+    }
+
+    res.json({
+      team: currentTeam,
+      projects,
+      members: members.map((m) => ({
+        ...m,
+        project_ids: memberAssignments[m.user_id] || [],
+      })),
+    });
+  });
+
+  // PUT /api/v1/organization/teams/:id/members/:userId/projects — assign team member to specific projects
+  app.put('/api/v1/organization/teams/:id/members/:userId/projects', async (req, res) => {
+    manageTeam(req);
+    const teamId = String(req.params.id);
+    const userId = String(req.params.userId);
+    const wid = req.workspaceId;
+
+    if (!admin(req) && req.user.team_id !== teamId) {
+      throw new HttpError(403, 'You can only assign members within your own team.');
+    }
+
+    const body = z.object({ project_ids: z.array(z.string()) }).parse(req.body);
+
+    // Verify member belongs to this team
+    const memberRow = await db.one<{ user_id: string; team_role: string }>(
+      'SELECT user_id, team_role FROM employee_profiles WHERE workspace_id = ? AND user_id = ? AND team_id = ?',
+      [wid, userId, teamId],
+    );
+    if (!memberRow) throw new HttpError(404, 'Team member not found.');
+
+    // Get all projects assigned to this team
+    const teamPrjs = await db.all<{ project_id: string }>(
+      'SELECT project_id FROM project_team_assignments WHERE workspace_id = ? AND team_id = ?',
+      [wid, teamId],
+    );
+    const validTeamPrjIds = new Set(teamPrjs.map((p) => p.project_id));
+    const memberRole = memberRow.team_role === 'viewer' ? 'viewer' : 'member';
+
+    await db.transaction(async () => {
+      // Remove from team projects that are NOT in body.project_ids
+      for (const prjId of validTeamPrjIds) {
+        if (!body.project_ids.includes(prjId)) {
+          const prj = await db.one<{ lead_id: string }>('SELECT lead_id FROM projects WHERE id = ?', [
+            prjId,
+          ]);
+          if (prj?.lead_id !== userId) {
+            await db.run(
+              'DELETE FROM project_members WHERE workspace_id = ? AND project_id = ? AND user_id = ?',
+              [wid, prjId, userId],
+            );
+          }
+        }
+      }
+
+      // Add to team projects that ARE in body.project_ids
+      for (const prjId of body.project_ids) {
+        if (validTeamPrjIds.has(prjId)) {
+          const exists = await db.one(
+            'SELECT user_id FROM project_members WHERE workspace_id = ? AND project_id = ? AND user_id = ?',
+            [wid, prjId, userId],
+          );
+          if (!exists) {
+            await db.insert('project_members', {
+              workspace_id: wid,
+              project_id: prjId,
+              user_id: userId,
+              role: memberRole,
+            });
+          }
+        }
+      }
+
+      await audit(
+        req,
+        'team.member.projects_assigned',
+        teamId,
+        JSON.stringify({ userId, project_ids: body.project_ids }),
+      );
+    });
+
+    broadcast(req);
+    res.json({ ok: true, project_ids: body.project_ids });
+  });
+
+  // PUT /api/v1/organization/teams/:id/projects/:projectId/members — assign team members to a project
+  app.put('/api/v1/organization/teams/:id/projects/:projectId/members', async (req, res) => {
+    manageTeam(req);
+    const teamId = String(req.params.id);
+    const projectId = String(req.params.projectId);
+    const wid = req.workspaceId;
+
+    if (!admin(req) && req.user.team_id !== teamId) {
+      throw new HttpError(403, 'You can only assign members within your own team.');
+    }
+
+    const body = z.object({ user_ids: z.array(z.string()) }).parse(req.body);
+
+    // Verify project is assigned to this team
+    const assignedPrj = await db.one(
+      'SELECT project_id FROM project_team_assignments WHERE workspace_id = ? AND team_id = ? AND project_id = ?',
+      [wid, teamId, projectId],
+    );
+    if (!assignedPrj) throw new HttpError(404, 'Project is not assigned to this team.');
+
+    // Get team members
+    const teamMembers = await db.all<{ user_id: string; team_role: string }>(
+      'SELECT user_id, team_role FROM employee_profiles WHERE workspace_id = ? AND team_id = ?',
+      [wid, teamId],
+    );
+    const teamUserMap = new Map(teamMembers.map((m) => [m.user_id, m.team_role]));
+    const prj = await db.one<{ lead_id: string }>('SELECT lead_id FROM projects WHERE id = ?', [
+      projectId,
+    ]);
+
+    await db.transaction(async () => {
+      // Remove team members not in body.user_ids from this project
+      for (const uid of teamUserMap.keys()) {
+        if (!body.user_ids.includes(uid) && prj?.lead_id !== uid) {
+          await db.run(
+            'DELETE FROM project_members WHERE workspace_id = ? AND project_id = ? AND user_id = ?',
+            [wid, projectId, uid],
+          );
+        }
+      }
+
+      // Add members in body.user_ids to this project
+      for (const uid of body.user_ids) {
+        if (teamUserMap.has(uid)) {
+          const exists = await db.one(
+            'SELECT user_id FROM project_members WHERE workspace_id = ? AND project_id = ? AND user_id = ?',
+            [wid, projectId, uid],
+          );
+          if (!exists) {
+            await db.insert('project_members', {
+              workspace_id: wid,
+              project_id: projectId,
+              user_id: uid,
+              role: teamUserMap.get(uid) === 'viewer' ? 'viewer' : 'member',
+            });
+          }
+        }
+      }
+
+      await audit(
+        req,
+        'team.project.members_assigned',
+        teamId,
+        JSON.stringify({ projectId, user_ids: body.user_ids }),
+      );
+    });
+
+    broadcast(req);
+    res.json({ ok: true, user_ids: body.user_ids });
   });
   app.get('/api/v1/organization/teams/:id/contributions', async (req, res) => {
     const teamId = String(req.params.id);

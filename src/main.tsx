@@ -14,6 +14,14 @@ import './insights-sandbox.css';
 import './dependency-capacity.css';
 import './chat.css';
 import './team-resources.css';
+
+if (typeof document !== 'undefined') {
+  document.documentElement.removeAttribute('data-theme');
+}
+if (typeof localStorage !== 'undefined') {
+  localStorage.removeItem('grace-theme');
+}
+
 const client = new QueryClient({
   defaultOptions: {
     queries: { retry: false, refetchOnWindowFocus: true, staleTime: 15000 },

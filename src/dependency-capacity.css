@@ -61,11 +61,11 @@
 }
 .dep-filter-select {
   font-size: 13px;
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1px solid var(--line, #e2e8f0);
   border-radius: 6px;
-  padding: 5px 10px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #2d3748);
+  padding: 6px 32px 6px 10px;
+  background-color: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
 }
 .dep-zoom-controls {
   display: flex;
@@ -307,10 +307,11 @@
 }
 .issue-deps-type-select {
   font-size: 12px;
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1px solid var(--line, #e2e8f0);
   border-radius: 5px;
-  padding: 5px 8px;
-  background: var(--bg-primary, #fff);
+  padding: 5px 30px 5px 8px;
+  background-color: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
 }
 .issue-deps-search-wrap {
   position: relative;
@@ -477,11 +478,11 @@
 }
 .capacity-select {
   font-size: 13px;
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1px solid var(--line, #e2e8f0);
   border-radius: 6px;
-  padding: 6px 12px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #2d3748);
+  padding: 6px 34px 6px 12px;
+  background-color: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
   min-width: 180px;
 }
 .capacity-trend-toggle {

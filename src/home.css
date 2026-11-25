@@ -67,7 +67,7 @@
   max-width: 240px;
   height: 36px;
   font-size: 14px;
-  background: white;
+  background-color: #ffffff;
 }
 .home-metrics {
   display: grid;
@@ -539,7 +539,7 @@
   width: 50%;
   font-size: 12px;
   height: 34px;
-  padding: 6px 8px;
+  padding: 6px 30px 6px 10px;
 }
 .home-feed-scroll {
   max-height: 580px;

@@ -135,19 +135,17 @@ export function CreateHub({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </div>
-        <button
-          className="create-project-link"
-          onClick={() => {
-            onClose();
-            openProjectCreate();
-          }}
-          disabled={
-            data.user.role === 'viewer' ||
-            (!data.organization?.can_admin && data.user.team_role === 'viewer')
-          }
-        >
-          <Plus size={16} /> Create a project
-        </button>
+        {['owner', 'admin'].includes(data.user.role) && (
+          <button
+            className="create-project-link"
+            onClick={() => {
+              onClose();
+              openProjectCreate();
+            }}
+          >
+            <Plus size={16} /> Create a project
+          </button>
+        )}
         <small>Available actions follow your organization and team privileges.</small>
       </div>
     </Modal>

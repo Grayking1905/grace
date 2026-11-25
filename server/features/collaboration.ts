@@ -34,7 +34,7 @@ export function registerCollaborationRoutes({
     const current = await issue(req, String(req.params.id));
     res.json(
       await db.all(
-        `SELECT u.id,u.name,u.email,u.color,u.capacity,m.role FROM memberships m JOIN users u ON u.id=m.user_id JOIN projects p ON p.workspace_id=m.workspace_id WHERE m.workspace_id=? AND p.id=? AND NOT EXISTS (SELECT 1 FROM member_deactivations md WHERE md.workspace_id=m.workspace_id AND md.user_id=m.user_id) AND (p.visibility='workspace' OR m.role IN ('owner','admin') OR p.lead_id=m.user_id OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=m.user_id AND pm.workspace_id=m.workspace_id)) ORDER BY u.name LIMIT 1000`,
+        `SELECT u.id,u.name,u.email,u.color,u.capacity,m.role FROM memberships m JOIN users u ON u.id=m.user_id JOIN projects p ON p.workspace_id=m.workspace_id WHERE m.workspace_id=? AND p.id=? AND NOT EXISTS (SELECT 1 FROM member_deactivations md WHERE md.workspace_id=m.workspace_id AND md.user_id=m.user_id) AND (m.role IN ('owner','admin') OR p.lead_id=m.user_id OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=m.user_id AND pm.workspace_id=m.workspace_id) OR (p.visibility<>'private' AND EXISTS (SELECT 1 FROM employee_profiles ep JOIN project_team_assignments pta ON pta.team_id=ep.team_id AND pta.workspace_id=ep.workspace_id WHERE ep.workspace_id=m.workspace_id AND ep.user_id=m.user_id AND ep.team_role IN ('lead','manager') AND pta.project_id=p.id))) ORDER BY u.name LIMIT 1000`,
         [req.workspaceId, current.project_id],
       ),
     );

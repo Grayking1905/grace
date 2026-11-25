@@ -34,15 +34,37 @@ export function registerAdministrationRoutes(ctx: AdministrationContext) {
       'SELECT role FROM project_members WHERE workspace_id = ? AND project_id = ? AND user_id = ?',
       [req.workspaceId, record.id, req.user.id],
     );
-    return member?.role === 'admin';
+    if (member?.role === 'admin') return true;
+    const teamLead = await db.one(
+      `SELECT 1 FROM project_team_assignments pta
+       JOIN employee_profiles ep ON ep.team_id = pta.team_id AND ep.workspace_id = pta.workspace_id
+       WHERE pta.project_id = ? AND pta.workspace_id = ? AND ep.user_id = ? AND ep.team_role IN ('lead', 'manager')`,
+      [record.id, req.workspaceId, req.user.id],
+    );
+    return Boolean(teamLead);
   }
-  async function managedProject(req: Request, projectId: string, archived = false) {
+  async function managedProject(
+    req: Request,
+    projectId: string,
+    archived = false,
+    allowTeamLead = true,
+  ) {
     canWrite(req);
     const record = archived
       ? (await visibleProjects(req, true)).find((p) => p.id === projectId)
       : await project(req, projectId, true);
     if (!record) throw new HttpError(404, 'Project not found.');
-    if (!(await mayManage(req, record)))
+    const canEdit = allowTeamLead
+      ? await mayManage(req, record)
+      : administrator(req) ||
+        record.lead_id === req.user.id ||
+        (
+          await db.one<{ role: string }>(
+            'SELECT role FROM project_members WHERE workspace_id = ? AND project_id = ? AND user_id = ?',
+            [req.workspaceId, record.id, req.user.id],
+          )
+        )?.role === 'admin';
+    if (!canEdit)
       throw new HttpError(
         403,
         'A project lead or administrator must make this change.',
@@ -333,7 +355,7 @@ export function registerAdministrationRoutes(ctx: AdministrationContext) {
     );
   });
   app.post('/api/v1/projects/:id/archive', async (req, res) => {
-    const record = await managedProject(req, String(req.params.id));
+    const record = await managedProject(req, String(req.params.id), false, false);
     await db.transaction(async () => {
       await db.run('UPDATE projects SET archived_at = ? WHERE id = ? AND workspace_id = ?', [
         now(),
@@ -346,7 +368,7 @@ export function registerAdministrationRoutes(ctx: AdministrationContext) {
     res.json({ ok: true });
   });
   app.post('/api/v1/projects/:id/restore', async (req, res) => {
-    const record = await managedProject(req, String(req.params.id), true);
+    const record = await managedProject(req, String(req.params.id), true, false);
     if (!record.archived_at) throw new HttpError(409, 'This project is already active.');
     await db.transaction(async () => {
       await db.run('UPDATE projects SET archived_at = NULL WHERE id = ? AND workspace_id = ?', [

@@ -29,12 +29,20 @@ export function registerDependencyRoutes(
   app: Express,
   db: Database,
   broadcast?: (req: Request) => void,
+  access?: {
+    issue: (req: Request, id: string, write?: boolean) => Promise<{ id: string; project_id: string }>;
+    visibleProjects: (req: Request) => Promise<{ id: string }[]>;
+  },
 ) {
   // GET /api/v1/issues/:id/links — full dependency list for one issue
   app.get('/api/v1/issues/:issueId/links', async (req: Request, res: Response) => {
     if (!req.user) throw new HttpError(401, 'Not authenticated');
     const issueId = String(req.params.issueId);
     const wid = req.workspaceId;
+    if (access) await access.issue(req, issueId, false);
+    const visibleIds = access
+      ? new Set((await access.visibleProjects(req)).map((p) => p.id))
+      : null;
 
     // Outgoing links (this issue is source)
     const outgoing = await db.all<{
@@ -45,10 +53,11 @@ export function registerDependencyRoutes(
       summary: string;
       status_name: string;
       priority: string;
+      project_id: string;
     }>(
       `SELECT il.id, il.target_id, il.type,
               i.\`key\` AS key,
-              i.summary, i.priority,
+              i.summary, i.priority, i.project_id,
               s.name AS status_name
        FROM issue_links il
        JOIN issues i ON il.target_id = i.id
@@ -67,10 +76,11 @@ export function registerDependencyRoutes(
       summary: string;
       status_name: string;
       priority: string;
+      project_id: string;
     }>(
       `SELECT il.id, il.source_id, il.type,
               i.\`key\` AS key,
-              i.summary, i.priority,
+              i.summary, i.priority, i.project_id,
               s.name AS status_name
        FROM issue_links il
        JOIN issues i ON il.source_id = i.id
@@ -80,7 +90,14 @@ export function registerDependencyRoutes(
       [wid, issueId],
     );
 
-    res.json({ outgoing, incoming });
+    res.json({
+      outgoing: (visibleIds ? outgoing.filter((l) => visibleIds.has(l.project_id)) : outgoing).map(
+        ({ project_id: _pid, ...rest }) => rest,
+      ),
+      incoming: (visibleIds ? incoming.filter((l) => visibleIds.has(l.project_id)) : incoming).map(
+        ({ project_id: _pid, ...rest }) => rest,
+      ),
+    });
   });
 
   // POST /api/v1/issues/:id/links — add dependency
@@ -100,22 +117,27 @@ export function registerDependencyRoutes(
       return;
     }
 
-    // Verify source and target belong to same workspace
-    const src = await db.one<{ id: string }>(
-      `SELECT id FROM issues WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-      [issueId, wid],
-    );
-    if (!src) {
-      res.status(404).json({ error: 'Source issue not found' });
-      return;
-    }
-    const tgt = await db.one<{ id: string }>(
-      `SELECT id FROM issues WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-      [body.target_id, wid],
-    );
-    if (!tgt) {
-      res.status(404).json({ error: 'Target issue not found' });
-      return;
+    if (access) {
+      await access.issue(req, issueId, true);
+      await access.issue(req, body.target_id, false);
+    } else {
+      // Verify source and target belong to same workspace
+      const src = await db.one<{ id: string }>(
+        `SELECT id FROM issues WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+        [issueId, wid],
+      );
+      if (!src) {
+        res.status(404).json({ error: 'Source issue not found' });
+        return;
+      }
+      const tgt = await db.one<{ id: string }>(
+        `SELECT id FROM issues WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+        [body.target_id, wid],
+      );
+      if (!tgt) {
+        res.status(404).json({ error: 'Target issue not found' });
+        return;
+      }
     }
 
     const existing = await db.one<{ id: string }>(

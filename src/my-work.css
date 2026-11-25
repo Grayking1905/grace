@@ -162,10 +162,11 @@
 .mywork-filter-select select {
   height: 34px;
   font-size: 13px;
-  background: white;
+  background-color: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 4px 32px 4px 10px;
 }
 
 /* Needs Attention Section */

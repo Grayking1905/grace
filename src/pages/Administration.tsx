@@ -975,7 +975,7 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
                   <input
                     type="checkbox"
                     checked={isAssigned}
-                    disabled={!canManage || busy}
+                    disabled={!isWorkspaceAdmin || busy}
                     onChange={(e) => {
                       if (e.target.checked) {
                         setTeamAssignments([...currentAssigned, t.id]);
@@ -998,7 +998,7 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
             })}
           </div>
 
-          {canManage && (
+          {isWorkspaceAdmin ? (
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
               <Button
                 variant="secondary"
@@ -1020,11 +1020,17 @@ export function ProjectAdministration({ projectId }: { projectId: string }) {
                 Save assigned teams
               </Button>
             </div>
+          ) : (
+            <p className="administration-form-help" style={{ marginTop: 4 }}>
+              Only workspace administrators can assign or reassign projects across teams.
+            </p>
           )}
         </section>
       )}
 
-      {canManage && (
+      {(isWorkspaceAdmin ||
+        project.lead_id === data.user.id ||
+        members.data?.members.some((m) => m.id === data.user.id && m.role === 'admin')) && (
         <section className="panel administration-panel administration-archive-panel">
           <div>
             <h2>Archive this project</h2>

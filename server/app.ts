@@ -434,14 +434,25 @@ export async function createApp(
       'SELECT project_id, team_id FROM project_team_assignments WHERE workspace_id = ?',
       [req.workspaceId],
     );
+    const isLeadOrManager =
+      ['lead', 'manager'].includes(req.user.team_role || '') && !!req.user.team_id;
     return projects
-      .filter(
-        (p) =>
-          admin ||
-          p.visibility !== 'private' ||
-          p.lead_id === req.user.id ||
-          members.some((m) => m.project_id === p.id),
-      )
+      .filter((p) => {
+        if (admin) return true;
+        if (p.visibility === 'private') {
+          return p.lead_id === req.user.id || members.some((m) => m.project_id === p.id);
+        }
+        if (p.lead_id === req.user.id || members.some((m) => m.project_id === p.id)) {
+          return true;
+        }
+        if (
+          isLeadOrManager &&
+          teamAssignments.some((a) => a.project_id === p.id && a.team_id === req.user.team_id)
+        ) {
+          return true;
+        }
+        return false;
+      })
       .map((p) => ({
         ...p,
         team_ids: teamAssignments
@@ -479,8 +490,22 @@ export async function createApp(
       [projectId, req.user.id, req.workspaceId],
     );
     const admin = ['owner', 'admin'].includes(req.user.role);
-    if (result.visibility === 'private' && !admin && !membership && result.lead_id !== req.user.id)
-      throw new HttpError(404, 'Project not found.');
+    if (!admin) {
+      let allowed = result.lead_id === req.user.id || !!membership;
+      if (
+        !allowed &&
+        result.visibility !== 'private' &&
+        ['lead', 'manager'].includes(req.user.team_role || '') &&
+        req.user.team_id
+      ) {
+        const teamAssigned = await db.one(
+          'SELECT 1 FROM project_team_assignments WHERE project_id = ? AND team_id = ? AND workspace_id = ?',
+          [projectId, req.user.team_id, req.workspaceId],
+        );
+        allowed = !!teamAssigned;
+      }
+      if (!allowed) throw new HttpError(404, 'Project not found.');
+    }
     if (write) {
       canWrite(req);
       if (!admin && membership?.role === 'viewer')
@@ -705,9 +730,46 @@ export async function createApp(
   registerSearchRoutes(app, db);
   registerInsightsRoutes(app, db);
   registerSandboxRoutes(app, db);
-  registerDependencyRoutes(app, db, broadcast);
-  registerCapacityRoutes(app, db, broadcast);
-  registerChatRoutes(app, db, io, broadcast);
+  app.get('/api/v1/projects/:projectId/dependency-graph', async (req, _res, next) => {
+    try {
+      await project(req, String(req.params.projectId), false);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.delete('/api/v1/issue-links/:linkId', async (req, _res, next) => {
+    try {
+      const link = await db.one<{ source_id: string }>(
+        'SELECT source_id FROM issue_links WHERE id = ? AND workspace_id = ?',
+        [String(req.params.linkId), req.workspaceId],
+      );
+      if (!link) throw new HttpError(404, 'Link not found');
+      await issue(req, link.source_id, true);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+  registerDependencyRoutes(app, db, broadcast, { issue, visibleProjects });
+  registerCapacityRoutes(app, db, broadcast, project);
+  registerChatRoutes(app, db, io, broadcast, visibleProjects);
+  app.use('/api/v1/projects/:projectId/documents', async (req, _res, next) => {
+    try {
+      await project(req, String(req.params.projectId), req.method !== 'GET');
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.get('/api/v1/projects/:projectId/shared-resources', async (req, _res, next) => {
+    try {
+      await project(req, String(req.params.projectId), false);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
   registerProjectDocsRoutes(app, db, broadcast);
   registerPortfolioRoutes({ app, db, project, visibleProjects, audit, broadcast });
   registerOrganizationRoutes({ app, db, project, issue, visibleProjects, audit, broadcast });
@@ -809,7 +871,7 @@ export async function createApp(
   });
   app.get('/api/v1/projects', async (req, res) => res.json(await visibleProjects(req)));
   app.post('/api/v1/projects', async (req, res) => {
-    canWrite(req);
+    canAdmin(req);
     const body = z
       .object({
         name: z.string().trim().min(2).max(120),
@@ -821,8 +883,14 @@ export async function createApp(
           .default('#e9e3f5'),
         template: z.enum(['scrum', 'kanban', 'bug', 'basic', 'blank']).default('scrum'),
         visibility: z.enum(['workspace', 'private']).default('workspace'),
+        team_ids: z
+          .array(z.string().min(1).max(64))
+          .max(100)
+          .transform((v) => [...new Set(v)])
+          .default([]),
       })
       .parse(req.body);
+    const { team_ids, ...projectFields } = body;
     const projectId = id();
     await db.transaction(async () => {
       if (
@@ -832,8 +900,17 @@ export async function createApp(
         ])
       )
         throw new HttpError(409, 'This project key is already in use.');
+      if (team_ids.length > 0) {
+        const orgTeams = await db.all<{ id: string }>(
+          'SELECT id FROM organization_teams WHERE workspace_id = ?',
+          [req.workspaceId],
+        );
+        if (team_ids.some((tid) => !orgTeams.some((t) => t.id === tid))) {
+          throw new HttpError(404, 'Choose teams from this organization.');
+        }
+      }
       await db.insert('projects', {
-        ...body,
+        ...projectFields,
         id: projectId,
         workspace_id: req.workspaceId,
         lead_id: req.user.id,
@@ -846,6 +923,20 @@ export async function createApp(
         user_id: req.user.id,
         role: 'admin',
       });
+      if (team_ids.length > 0) {
+        await db.insert('project_team_settings', {
+          workspace_id: req.workspaceId,
+          project_id: projectId,
+          version: 1,
+        });
+        for (const tid of team_ids) {
+          await db.insert('project_team_assignments', {
+            workspace_id: req.workspaceId,
+            project_id: projectId,
+            team_id: tid,
+          });
+        }
+      }
       await createStatuses(db, req.workspaceId, projectId, body.template);
       await audit(req, 'project.created', projectId);
     });
@@ -902,6 +993,10 @@ export async function createApp(
       // 2. Chat channels & messages
       const channels = await db.all<{ id: string }>('SELECT id FROM chat_channels WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
       for (const ch of channels) {
+        const msgs = await db.all<{ id: string }>('SELECT id FROM chat_messages WHERE channel_id = ?', [ch.id]);
+        for (const m of msgs) {
+          await db.run('DELETE FROM chat_reactions WHERE message_id = ?', [m.id]);
+        }
         await db.run('DELETE FROM chat_reads WHERE channel_id = ?', [ch.id]);
         await db.run('DELETE FROM chat_messages WHERE channel_id = ?', [ch.id]);
       }
@@ -918,16 +1013,35 @@ export async function createApp(
       const prjIssues = await db.all<{ id: string }>('SELECT id FROM issues WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
       for (const iss of prjIssues) {
         await db.run('DELETE FROM organization_work_issues WHERE issue_id = ?', [iss.id]);
-        await db.run('DELETE FROM issue_history WHERE issue_id = ?', [iss.id]);
-        await db.run('DELETE FROM issue_comments WHERE issue_id = ?', [iss.id]);
-        await db.run('DELETE FROM issue_labels WHERE issue_id = ?', [iss.id]);
-        await db.run('DELETE FROM issue_attachments WHERE issue_id = ?', [iss.id]);
-        await db.run('DELETE FROM issue_dependencies WHERE source_issue_id = ? OR target_issue_id = ?', [iss.id, iss.id]);
+        await db.run('DELETE FROM issue_aliases WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM comment_mentions WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM notifications WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM watchers WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM history WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM comments WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM worklogs WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM attachments WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM issue_links WHERE source_id = ? OR target_id = ?', [iss.id, iss.id]);
+        await db.run('DELETE FROM module_issues WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM planning_baselines WHERE issue_id = ?', [iss.id]);
+        await db.run('DELETE FROM sprint_issue_snapshots WHERE issue_id = ?', [iss.id]);
       }
+      await db.run('UPDATE issues SET parent_id = NULL WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
       await db.run('DELETE FROM issues WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
 
       // 5. Modules, sprints, statuses
+      const mods = await db.all<{ id: string }>('SELECT id FROM project_modules WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      for (const mod of mods) {
+        await db.run('DELETE FROM module_dependencies WHERE module_id = ? OR depends_on_id = ?', [mod.id, mod.id]);
+        await db.run('DELETE FROM module_members WHERE module_id = ?', [mod.id]);
+        await db.run('DELETE FROM initiative_modules WHERE module_id = ?', [mod.id]);
+      }
       await db.run('DELETE FROM project_modules WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      const spIds = await db.all<{ id: string }>('SELECT id FROM sprints WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
+      for (const sp of spIds) {
+        await db.run('DELETE FROM sprint_capacity WHERE sprint_id = ?', [sp.id]);
+        await db.run('DELETE FROM sprint_snapshots WHERE sprint_id = ?', [sp.id]);
+      }
       await db.run('DELETE FROM sprints WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
       await db.run('DELETE FROM statuses WHERE project_id = ? AND workspace_id = ?', [prj.id, req.workspaceId]);
 

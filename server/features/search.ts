@@ -31,12 +31,23 @@ const schema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 export function visibilityScope(req: Request) {
+  if (['owner', 'admin'].includes(req.user.role)) {
+    return {
+      sql: `i.workspace_id=? AND i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM projects p WHERE p.id=i.project_id AND p.workspace_id=i.workspace_id AND p.archived_at IS NULL)`,
+      params: [req.workspaceId],
+    };
+  }
+  const isLeadOrManager =
+    ['lead', 'manager'].includes(req.user.team_role || '') && !!req.user.team_id;
+  if (isLeadOrManager) {
+    return {
+      sql: `i.workspace_id=? AND i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM projects p WHERE p.id=i.project_id AND p.workspace_id=i.workspace_id AND p.archived_at IS NULL AND (p.lead_id=? OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=? AND pm.workspace_id=p.workspace_id) OR (p.visibility<>'private' AND EXISTS (SELECT 1 FROM project_team_assignments pta WHERE pta.project_id=p.id AND pta.team_id=? AND pta.workspace_id=p.workspace_id))))`,
+      params: [req.workspaceId, req.user.id, req.user.id, req.user.team_id!],
+    };
+  }
   return {
-    sql: `i.workspace_id=? AND i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM projects p WHERE p.id=i.project_id AND p.workspace_id=i.workspace_id AND p.archived_at IS NULL ${['owner', 'admin'].includes(req.user.role) ? '' : "AND (p.visibility='workspace' OR p.lead_id=? OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=? AND pm.workspace_id=p.workspace_id))"})`,
-    params: [
-      req.workspaceId,
-      ...(['owner', 'admin'].includes(req.user.role) ? [] : [req.user.id, req.user.id]),
-    ],
+    sql: `i.workspace_id=? AND i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM projects p WHERE p.id=i.project_id AND p.workspace_id=i.workspace_id AND p.archived_at IS NULL AND (p.lead_id=? OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=? AND pm.workspace_id=p.workspace_id)))`,
+    params: [req.workspaceId, req.user.id, req.user.id],
   };
 }
 export async function queryIssuePage(db: Database, req: Request, raw: unknown) {
