@@ -296,9 +296,14 @@
 
 .team-member-modal-field select,
 .team-member-modal-field input {
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-radius: 6px;
-  border: 1px solid var(--border, #e2e8f0);
-  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--line, #e2e8f0);
+  background-color: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
   font-size: 13px;
+}
+
+.team-member-modal-field select {
+  padding-right: 34px;
 }

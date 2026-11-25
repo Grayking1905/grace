@@ -361,7 +361,7 @@ export function registerHomeRoutes({
       .parse(req.body);
     await db.transaction(async () => {
       await db.run('UPDATE workspaces SET name=name WHERE id=?', [req.workspaceId]);
-      await project(req, projectId, true);
+      const currentProject = await project(req, projectId, true);
       const teams = await db.all<{ id: string }>(
         'SELECT id FROM organization_teams WHERE workspace_id=?',
         [req.workspaceId],
@@ -378,6 +378,13 @@ export function registerHomeRoutes({
           'Project team assignments changed. Refresh before saving.',
           'EDIT_CONFLICT',
         );
+      const existingAssignments = await db.all<{ team_id: string }>(
+        'SELECT team_id FROM project_team_assignments WHERE project_id=? AND workspace_id=?',
+        [projectId, req.workspaceId],
+      );
+      const removedTeamIds = existingAssignments
+        .map((a) => a.team_id)
+        .filter((tid) => !body.team_ids.includes(tid));
       if (previous)
         await db.run(
           'UPDATE project_team_settings SET version=version+1 WHERE project_id=? AND workspace_id=?',
@@ -399,6 +406,24 @@ export function registerHomeRoutes({
           project_id: projectId,
           team_id: teamId,
         });
+      if (removedTeamIds.length > 0) {
+        const removedMembers = await db.all<{ user_id: string }>(
+          `SELECT ep.user_id
+           FROM employee_profiles ep
+           JOIN memberships m ON m.workspace_id=ep.workspace_id AND m.user_id=ep.user_id
+           WHERE ep.workspace_id=? AND ep.team_id IN (${marks(removedTeamIds)})
+             AND m.role NOT IN ('owner','admin')`,
+          [req.workspaceId, ...removedTeamIds],
+        );
+        for (const rm of removedMembers) {
+          if (rm.user_id !== currentProject.lead_id) {
+            await db.run(
+              'DELETE FROM project_members WHERE workspace_id=? AND project_id=? AND user_id=?',
+              [req.workspaceId, projectId, rm.user_id],
+            );
+          }
+        }
+      }
       await audit(req, 'project.teams.assigned', projectId);
     });
     broadcast(req);

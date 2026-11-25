@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowUpRight,
   LayoutDashboard,
@@ -22,7 +22,7 @@ import {
   type TeamPermissions,
 } from '../../shared/organization';
 import { useGrace } from '../context';
-import { api, patch, post } from '../lib/api';
+import { api, patch, post, del } from '../lib/api';
 import { Avatar, Badge, Button, Empty, Modal } from '../components/ui';
 import '../organization.css';
 
@@ -53,10 +53,13 @@ export { TeamDashboard } from './TeamDashboard';
 type Employee = EmployeeProfile & Pick<User, 'name' | 'email' | 'color' | 'role' | 'active'>;
 export function OrganizationAdministration() {
   const { data } = useGrace();
+  const [searchParams] = useSearchParams();
   const admin = !!data.organization?.can_admin;
   const mayManage = admin || !!data.organization?.can_manage_team;
   const [tab, setTab] = useState('dashboards');
-  const [editing, setEditing] = useState<OrganizationTeam | null | undefined>(undefined);
+  const [editing, setEditing] = useState<OrganizationTeam | null | undefined>(
+    searchParams.get('action') === 'new-team' ? null : undefined,
+  );
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [search, setSearch] = useState('');
   const employees = useQuery({
@@ -239,6 +242,7 @@ function TeamConfiguration({
     team?.permissions || defaultTeamPermissions,
   );
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setBusy(true);
@@ -331,6 +335,66 @@ function TeamConfiguration({
                 </small>
               </fieldset>
             </details>
+          )}
+          {admin && team && (
+            <div
+              style={{
+                marginTop: 20,
+                padding: 14,
+                borderRadius: 8,
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                background: 'rgba(239, 68, 68, 0.05)',
+              }}
+            >
+              <h4
+                style={{
+                  color: '#ef4444',
+                  marginBottom: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 700,
+                }}
+              >
+                Delete Team
+              </h4>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: 'var(--text-muted, #64748b)',
+                  margin: '0 0 10px 0',
+                  lineHeight: 1.5,
+                }}
+              >
+                Deleting this team will safely <strong>archive</strong> (not delete) any projects
+                that are exclusively assigned to it, allowing admins to reassign them to other teams
+                later.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                busy={deleting}
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `Are you sure you want to delete the team "${team.name}"? Projects assigned exclusively to this team will be safely archived so you can reassign them later.`,
+                    )
+                  )
+                    return;
+                  setDeleting(true);
+                  const res = await run(
+                    () => del<{ ok: boolean; archived_projects: string[] }>(`/organization/teams/${team.id}`),
+                    `Team "${team.name}" deleted.`,
+                  );
+                  setDeleting(false);
+                  if (res) onClose();
+                }}
+              >
+                Delete team
+              </Button>
+            </div>
           )}
         </div>
         <div className="modal-footer">

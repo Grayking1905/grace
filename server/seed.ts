@@ -138,13 +138,19 @@ export async function seed(db: Database) {
         description,
         color,
         icon,
-        lead_id: people[p][0],
+        lead_id: p === 0 ? 'user-alex' : 'user-priya',
         template: 'scrum',
         favorite: 1,
         next_number: count + 1,
         created_at: dateOffset(-35),
       });
-      for (const person of people)
+      const seededMembers =
+        p === 0
+          ? people
+          : p === 1
+            ? people.filter((person) => ['user-alex', 'user-priya', 'user-james'].includes(person[0]))
+            : people.filter((person) => ['user-alex', 'user-priya', 'user-sarah'].includes(person[0]));
+      for (const person of seededMembers)
         await db.insert('project_members', {
           workspace_id: demoWorkspace,
           project_id: pid,

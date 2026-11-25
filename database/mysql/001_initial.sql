@@ -439,6 +439,9 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   workspace_id VARCHAR(64) NOT NULL,
   channel_id VARCHAR(64) NOT NULL,
   sender_id VARCHAR(64) NOT NULL,
+  reply_to_id VARCHAR(64),
+  forwarded_from VARCHAR(100),
+  edited INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL,
   attachments TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,
@@ -447,6 +450,18 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
   FOREIGN KEY(channel_id) REFERENCES chat_channels(id),
   FOREIGN KEY(sender_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS chat_reactions (
+  id VARCHAR(64) PRIMARY KEY,
+  workspace_id VARCHAR(64) NOT NULL,
+  message_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  emoji VARCHAR(32) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+  FOREIGN KEY(message_id) REFERENCES chat_messages(id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS chat_reads (
@@ -749,4 +764,5 @@ CREATE INDEX issue_links_target ON issue_links (workspace_id,target_id);
 CREATE INDEX chat_messages_channel ON chat_messages (workspace_id,channel_id,created_at);
 CREATE INDEX chat_channels_team ON chat_channels (workspace_id,team_id);
 CREATE INDEX chat_channels_project ON chat_channels (workspace_id,project_id);
+CREATE INDEX chat_reactions_msg ON chat_reactions (workspace_id,message_id);
 CREATE INDEX project_docs_project ON project_documents (workspace_id,project_id);

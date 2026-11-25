@@ -217,14 +217,12 @@ export function Dashboard() {
               day: 'numeric',
             })}
           </span>
-          <Button
-            variant="secondary"
-            onClick={openProjectCreate}
-            disabled={data.user.role === 'viewer'}
-          >
-            <Plus size={15} />
-            New project
-          </Button>
+          {['owner', 'admin'].includes(data.user.role) && (
+            <Button variant="secondary" onClick={openProjectCreate}>
+              <Plus size={15} />
+              New project
+            </Button>
+          )}
         </div>
       </div>
       <section className="welcome-banner">
@@ -305,12 +303,18 @@ export function Dashboard() {
         ) : (
           <Empty
             title="Your next big thing starts here"
-            text="Create a project and turn your ideas into a plan."
+            text={
+              ['owner', 'admin'].includes(data.user.role)
+                ? 'Create a project and turn your ideas into a plan.'
+                : 'Projects assigned to you or your team will appear here.'
+            }
             action={
-              <Button onClick={openProjectCreate}>
-                <Plus size={15} />
-                Create a project
-              </Button>
+              ['owner', 'admin'].includes(data.user.role) ? (
+                <Button onClick={openProjectCreate}>
+                  <Plus size={15} />
+                  Create a project
+                </Button>
+              ) : undefined
             }
           />
         )}
@@ -846,10 +850,12 @@ export function Projects() {
           </h1>
           <p>Bring the right people around the work that matters.</p>
         </div>
-        <Button onClick={openProjectCreate} disabled={data.user.role === 'viewer'}>
-          <Plus size={15} />
-          New project
-        </Button>
+        {['owner', 'admin'].includes(data.user.role) && (
+          <Button onClick={openProjectCreate}>
+            <Plus size={15} />
+            New project
+          </Button>
+        )}
       </div>
       <div className="workspace-toolbar">
         <div className="tabs">
@@ -879,13 +885,23 @@ export function Projects() {
         </div>
       ) : (
         <Empty
-          title="Make space for your next big thing"
-          text="A project brings the plan, people, and progress together."
+          title={
+            ['owner', 'admin'].includes(data.user.role)
+              ? 'Make space for your next big thing'
+              : 'No projects assigned yet'
+          }
+          text={
+            ['owner', 'admin'].includes(data.user.role)
+              ? 'A project brings the plan, people, and progress together.'
+              : 'Your workspace administrator or team lead assigns projects to your view.'
+          }
           action={
-            <Button onClick={openProjectCreate}>
-              <Plus size={15} />
-              Create a project
-            </Button>
+            ['owner', 'admin'].includes(data.user.role) ? (
+              <Button onClick={openProjectCreate}>
+                <Plus size={15} />
+                Create a project
+              </Button>
+            ) : undefined
           }
         />
       )}

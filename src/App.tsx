@@ -982,16 +982,20 @@ function CreateIssue({
           <p>
             {requiredType
               ? 'No editable project supports this work type. Choose a suitable project configuration.'
-              : 'Create a project before adding work.'}
+              : ['owner', 'admin'].includes(data.user.role)
+                ? 'Create a project before adding work.'
+                : 'No assigned project is available yet. Ask an organization administrator or your team lead for access.'}
           </p>
-          <Button
-            onClick={() => {
-              onClose();
-              openProjectCreate();
-            }}
-          >
-            Create a project
-          </Button>
+          {['owner', 'admin'].includes(data.user.role) && (
+            <Button
+              onClick={() => {
+                onClose();
+                openProjectCreate();
+              }}
+            >
+              Create a project
+            </Button>
+          )}
         </div>
       ) : (
         <form onSubmit={submit}>
@@ -1181,14 +1185,19 @@ function CreateIssue({
   );
 }
 function CreateProject({ onClose }: { onClose: () => void }) {
-  const { run } = useGrace();
+  const { run, data } = useGrace();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
+  const [teamIds, setTeamIds] = useState<string[]>([]);
+  const teams = data.organization?.teams || [];
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setBusy(true);
     const values = Object.fromEntries(new FormData(e.currentTarget));
-    const created = await run(() => post<Project>('/projects', values), 'Your project is ready.');
+    const created = await run(
+      () => post<Project>('/projects', { ...values, team_ids: teamIds }),
+      'Your project is ready.',
+    );
     setBusy(false);
     if (created) {
       onClose();
@@ -1196,7 +1205,7 @@ function CreateProject({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <Modal title="Create project" onClose={onClose}>
+    <Modal title="Create project" onClose={onClose} wide>
       <form onSubmit={submit}>
         <div className="modal-body">
           <label>
@@ -1258,6 +1267,61 @@ function CreateProject({ onClose }: { onClose: () => void }) {
               </select>
             </label>
           </div>
+          {teams.length > 0 && (
+            <fieldset style={{ marginTop: 14, padding: '12px 14px', borderRadius: 10, border: '1px solid var(--line)' }}>
+              <legend style={{ fontSize: 13, fontWeight: 650, padding: '0 6px', color: 'var(--text)' }}>
+                Assign to teams (optional)
+              </legend>
+              <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>
+                Leave all unchecked to keep unassigned (visible to admins only), or choose one or multiple teams.
+              </small>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 8 }}>
+                {teams.map((t) => {
+                  const checked = teamIds.includes(t.id);
+                  return (
+                    <label
+                      key={t.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '7px 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${checked ? 'var(--green)' : 'var(--line)'}`,
+                        background: checked ? 'var(--green-light)' : 'var(--surface)',
+                        margin: 0,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        fontWeight: 550,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) setTeamIds((prev) => [...prev, t.id]);
+                          else setTeamIds((prev) => prev.filter((id) => id !== t.id));
+                        }}
+                      />
+                      <span
+                        style={{
+                          width: 9,
+                          height: 9,
+                          borderRadius: '50%',
+                          background: t.color || '#10b981',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.name}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
         </div>
         <div className="modal-footer">
           <Button type="button" variant="secondary" onClick={onClose}>

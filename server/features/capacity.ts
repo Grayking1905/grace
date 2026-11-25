@@ -16,6 +16,7 @@ export function registerCapacityRoutes(
   app: Express,
   db: Database,
   broadcast?: (req: Request) => void,
+  projectAccess?: (req: Request, id: string, write?: boolean) => Promise<unknown>,
 ) {
   // GET /api/v1/sprints/:id/capacity — per-member capacity for a sprint
   app.get('/api/v1/sprints/:sprintId/capacity', async (req: Request, res: Response) => {
@@ -42,6 +43,7 @@ export function registerCapacityRoutes(
       res.status(404).json({ error: 'Sprint not found' });
       return;
     }
+    if (projectAccess) await projectAccess(req, sprint.project_id, false);
 
     // Members of the project
     const members = await db.all<{
@@ -106,14 +108,15 @@ export function registerCapacityRoutes(
     const body = upsertCapacitySchema.parse(req.body);
 
     // Verify sprint
-    const sprint = await db.one<{ id: string }>(
-      `SELECT id FROM sprints WHERE id = ? AND workspace_id = ?`,
+    const sprint = await db.one<{ id: string; project_id: string }>(
+      `SELECT id, project_id FROM sprints WHERE id = ? AND workspace_id = ?`,
       [sprintId, wid],
     );
     if (!sprint) {
       res.status(404).json({ error: 'Sprint not found' });
       return;
     }
+    if (projectAccess) await projectAccess(req, sprint.project_id, true);
 
     // Verify user is a workspace member
     const member = await db.one<{ user_id: string }>(
@@ -165,6 +168,7 @@ export function registerCapacityRoutes(
     if (!req.user) throw new HttpError(401, 'Not authenticated');
     const projectId = String(req.params.projectId);
     const wid = req.workspaceId;
+    if (projectAccess) await projectAccess(req, projectId, false);
 
     const sprints = await db.all<{
       id: string;

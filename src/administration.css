@@ -148,12 +148,16 @@
 .administration-role-label select {
   font-size: 14px;
   width: 100%;
-  border: 1px solid #dce2d9;
-  background: #fff;
+  border: 1px solid var(--line, #e2e8f0);
+  background-color: var(--surface, #ffffff);
   border-radius: 7px;
   padding: 11px 12px;
-  color: #35453a;
+  color: var(--text, #0f172a);
   min-height: 43px;
+}
+.administration-form select,
+.administration-role-label select {
+  padding-right: 34px;
 }
 .administration-form textarea {
   resize: vertical;
@@ -233,7 +237,7 @@
 }
 .administration-role-label select {
   min-height: 38px;
-  padding: 8px 10px;
+  padding: 8px 34px 8px 10px;
 }
 .administration-workspace-menu {
   min-width: 300px;

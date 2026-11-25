@@ -327,10 +327,16 @@ export function TeamsDirectory() {
           <p>Choose a team to see its people and work.</p>
         </div>
         {data.organization?.can_admin && (
-          <Link className="btn secondary" to="/organization">
-            <Settings2 size={16} />
-            Manage teams
-          </Link>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Link className="btn secondary" to="/organization">
+              <Settings2 size={16} />
+              Manage teams
+            </Link>
+            <Link className="btn primary" to="/organization?action=new-team">
+              <Plus size={16} />
+              Create team
+            </Link>
+          </div>
         )}
       </div>
       <div className="search-field focus-team-search">

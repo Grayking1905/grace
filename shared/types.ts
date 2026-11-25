@@ -247,12 +247,37 @@ export interface ChatChannel {
   created_at: string;
   updated_at: string;
   unread_count?: number;
+  displayName?: string;
+  target_user?: {
+    id: string;
+    name: string;
+    email: string;
+    color: string;
+    team_role?: string;
+  };
   last_message?: {
     id: string;
     content: string;
     sender_name: string;
     created_at: string;
   } | null;
+}
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'audio' | 'voice' | 'document' | 'file' | 'location' | 'contact' | 'sticker' | 'link';
+  url?: string;
+  size?: number;
+  mime?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ChatReaction {
+  emoji: string;
+  count: number;
+  users: string[];
+  has_reacted: boolean;
 }
 
 export interface ChatMessage {
@@ -264,11 +289,29 @@ export interface ChatMessage {
   sender_color?: string;
   sender_role?: string;
   sender_team_role?: string;
+  reply_to_id?: string | null;
+  reply_to?: {
+    id: string;
+    sender_name: string;
+    content: string;
+  } | null;
+  forwarded_from?: string | null;
+  edited?: number;
   content: string;
-  attachments: string[];
+  attachments: (ChatAttachment | string)[];
   pinned: number;
+  reactions?: ChatReaction[];
   created_at: string;
   updated_at: string;
+}
+
+export interface TeamMemberProjectAllocation {
+  user_id: string;
+  name: string;
+  email: string;
+  color: string;
+  team_role: string;
+  project_ids: string[];
 }
 
 export interface ProjectDocument {

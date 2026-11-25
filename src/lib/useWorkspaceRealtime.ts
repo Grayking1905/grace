@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { api, ApiError } from './api';
-export function useWorkspaceRealtime(userId?: string, workspaceId?: string) {
+export function useWorkspaceRealtime(
+  userId?: string,
+  workspaceId?: string,
+  customListeners?: Record<string, (payload: any) => void>,
+) {
   const queryClient = useQueryClient();
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'offline'>(
     'connecting',
@@ -57,6 +61,11 @@ export function useWorkspaceRealtime(userId?: string, workspaceId?: string) {
     socket.on('presence.updated', () =>
       queryClient.invalidateQueries({ queryKey: ['home-overview'] }),
     );
+    if (customListeners) {
+      for (const [event, handler] of Object.entries(customListeners)) {
+        socket.on(event, handler);
+      }
+    }
     return () => {
       disposed = true;
       clearTimeout(timer);

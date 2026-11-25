@@ -36,6 +36,7 @@ export function AppNavigation({ openHelp }: { openHelp: () => void }) {
     (n) => location.pathname === n.to || location.pathname.startsWith(`${n.to}/`),
   );
   const [expanded, setExpanded] = useState(advanced);
+
   useEffect(() => {
     if (advanced) setExpanded(true);
   }, [location.pathname, advanced]);
