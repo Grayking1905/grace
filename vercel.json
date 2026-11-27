@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://grace-api-3l3p.onrender.com/api/$1"
+    },
+    {
+      "source": "/socket.io/(.*)",
+      "destination": "https://grace-api-3l3p.onrender.com/socket.io/$1"
+    },
+    {
+      "source": "/((?!api/|socket\\.io/|assets/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

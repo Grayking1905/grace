@@ -118,7 +118,7 @@ export async function createApp(
   const dispatchNotification = createNotifications(db, accounts);
   const app = express();
   const httpServer = createServer(app);
-  const origin = process.env.APP_ORIGIN || 'http://127.0.0.1:5173';
+  const origin = (process.env.APP_ORIGIN || 'http://127.0.0.1:5173').replace(/\/+$/, '');
   const allowedOrigins = new Set([
     origin,
     ...(!production
@@ -133,6 +133,7 @@ export async function createApp(
     cors: { origin: [...allowedOrigins], credentials: true },
     maxHttpBufferSize: 1e5,
   });
+  app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.disable('etag');
   app.use('/api', (_req, res, next) => {
